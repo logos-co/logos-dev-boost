@@ -1,0 +1,30 @@
+{
+  "name": "logos-dev-boost",
+  "version": "0.1.0",
+  "description": "AI-assisted development accelerator for the Logos modular application platform",
+  "type": "module",
+  "main": "dist/mcp-server/index.js",
+  "bin": {
+    "logos-dev-boost": "dist/installer/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "mcp": "node dist/mcp-server/index.js",
+    "install-boost": "node dist/installer/install.js",
+    "generate": "node dist/generators/generate-all.js",
+    "test": "node --test dist/tests/"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "fuse.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}
