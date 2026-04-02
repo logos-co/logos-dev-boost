@@ -15,70 +15,59 @@
       packages = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-
           nodejs = pkgs.nodejs_20;
-
-          # Build the TypeScript project
-          logos-dev-boost = pkgs.buildNpmPackage {
+        in
+        {
+          default = pkgs.buildNpmPackage {
             pname = "logos-dev-boost";
             version = "0.1.0";
             src = ./.;
 
-            npmDepsHash = "";  # Will be set after first npm install
+            npmDepsHash = "sha256-gYlu6L6CgYAa8c6xsCExogTcrn2bZVd7IropWQe+I8g=";
 
-            nativeBuildInputs = [ nodejs ];
+            nativeBuildInputs = [ nodejs pkgs.makeWrapper ];
 
             buildPhase = ''
+              runHook preBuild
               npx tsc
+              runHook postBuild
             '';
 
+            dontNpmPack = true;
+
             installPhase = ''
-              mkdir -p $out/{bin,lib/logos-dev-boost}
-              cp -r dist $out/lib/logos-dev-boost/
-              cp -r docs guidelines skills templates $out/lib/logos-dev-boost/
-              cp package.json $out/lib/logos-dev-boost/
+              runHook preInstall
 
-              # Copy node_modules for runtime deps
-              cp -r node_modules $out/lib/logos-dev-boost/ 2>/dev/null || true
+              mkdir -p $out/lib/logos-dev-boost
+              cp -r dist docs guidelines skills templates node_modules package.json $out/lib/logos-dev-boost/
 
-              # Create CLI wrapper
-              cat > $out/bin/logos-dev-boost <<EOF
-              #!/usr/bin/env bash
-              exec ${nodejs}/bin/node $out/lib/logos-dev-boost/dist/installer/cli.js "\$@"
-              EOF
-              chmod +x $out/bin/logos-dev-boost
+              mkdir -p $out/bin
+              makeWrapper ${nodejs}/bin/node $out/bin/logos-dev-boost \
+                --add-flags "$out/lib/logos-dev-boost/dist/installer/cli.js"
 
-              # Create MCP server wrapper
-              cat > $out/bin/logos-dev-boost-mcp <<EOF
-              #!/usr/bin/env bash
-              exec ${nodejs}/bin/node $out/lib/logos-dev-boost/dist/mcp-server/index.js "\$@"
-              EOF
-              chmod +x $out/bin/logos-dev-boost-mcp
+              makeWrapper ${nodejs}/bin/node $out/bin/logos-dev-boost-mcp \
+                --add-flags "$out/lib/logos-dev-boost/dist/mcp-server/index.js"
+
+              runHook postInstall
             '';
 
             meta = with pkgs.lib; {
               description = "AI-assisted development accelerator for the Logos modular application platform";
               license = licenses.mit;
+              mainProgram = "logos-dev-boost";
             };
           };
 
-          # Docs-only package (no Node.js needed)
           docs = pkgs.runCommand "logos-dev-boost-docs" {} ''
             mkdir -p $out
             cp -r ${./docs} $out/docs
             cp -r ${./guidelines} $out/guidelines
             cp -r ${./skills} $out/skills
             cp -r ${./templates} $out/templates
-            ${if builtins.pathExists ./llms.txt then "cp ${./llms.txt} $out/llms.txt" else ""}
           '';
-        in
-        {
-          default = logos-dev-boost;
-          inherit docs;
         }
       );
 
-      # CLI apps
       apps = forAllSystems (system: {
         default = {
           type = "app";
@@ -90,7 +79,6 @@
         };
       });
 
-      # Dev shell
       devShells = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
