@@ -88,6 +88,40 @@ async function main() {
         console.log("  (skipped — generators not built yet. Run 'npm run build' first)");
       }
 
+      // Generate .mcp.json pointing to the MCP server
+      const mcpServerJs = path.join(boostDir, "dist", "mcp-server", "index.js");
+      const mcpConfig = {
+        mcpServers: {
+          "logos-dev-boost": {
+            command: process.execPath,
+            args: [mcpServerJs],
+          },
+        },
+      };
+      const fs = await import("node:fs");
+      fs.writeFileSync(
+        path.join(projectDir, ".mcp.json"),
+        JSON.stringify(mcpConfig, null, 2) + "\n"
+      );
+      console.log("  .mcp.json (MCP server — auto-detected by Claude Code & Cursor)");
+
+      // Copy skills for Claude Code
+      const srcSkills = path.join(boostDir, "skills");
+      if (fs.existsSync(srcSkills)) {
+        const skills = fs.readdirSync(srcSkills).filter((d: string) =>
+          fs.existsSync(path.join(srcSkills, d, "SKILL.md"))
+        );
+        for (const skill of skills) {
+          const destDir = path.join(projectDir, ".claude", "skills", skill);
+          fs.mkdirSync(destDir, { recursive: true });
+          fs.copyFileSync(
+            path.join(srcSkills, skill, "SKILL.md"),
+            path.join(destDir, "SKILL.md")
+          );
+        }
+        console.log(`  .claude/skills/ (${skills.length} skills for Claude Code)`);
+      }
+
       console.log("\nNext steps:");
       for (const step of output.next_steps) {
         console.log(`  ${step}`);
