@@ -270,6 +270,11 @@ function createUiApp(
   filesCreated: string[]
 ) {
   const pascal = toPascalCase(name);
+  const qmlEscDescription = description
+    .replace(/\r?\n/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
+  const flakeEscDescription = description.replace(/"/g, '\\"').replace(/\r?\n/g, " ");
 
   writeFile(
     path.join(dir, "metadata.json"),
@@ -279,9 +284,17 @@ function createUiApp(
         version: "1.0.0",
         description,
         type: "ui",
-        category: "tools",
+        category: "ui",
         main: `${name}_plugin`,
         dependencies: [],
+        nix: {
+          packages: {
+            build: [],
+            runtime: ["qt6.qtdeclarative"],
+          },
+          external_libraries: [],
+          cmake: { find_packages: [], extra_sources: [] },
+        },
       },
       null,
       2
@@ -290,19 +303,56 @@ function createUiApp(
   );
 
   writeFile(
-    path.join(dir, `src/${pascal}Plugin.h`),
+    path.join(dir, "interfaces/IComponent.h"),
     `#pragma once
+
 #include <QObject>
 #include <QWidget>
 #include <QtPlugin>
-#include "IComponent.h"
+
+class LogosAPI;
+
+class IComponent {
+public:
+    virtual ~IComponent() = default;
+    virtual QWidget* createWidget(LogosAPI* logosAPI = nullptr) = 0;
+    virtual void destroyWidget(QWidget* widget) = 0;
+};
+
+#define IComponent_iid "com.logos.component.IComponent"
+Q_DECLARE_INTERFACE(IComponent, IComponent_iid)
+`,
+    filesCreated
+  );
+
+  writeFile(
+    path.join(dir, ".gitignore"),
+    `.DS_Store
+result
+build/
+`,
+    filesCreated
+  );
+
+  writeFile(
+    path.join(dir, `src/${name}_plugin.h`),
+    `#pragma once
+
+#include <IComponent.h>
+#include <QObject>
+
+class LogosAPI;
 
 class ${pascal}Plugin : public QObject, public IComponent {
     Q_OBJECT
     Q_INTERFACES(IComponent)
-    Q_PLUGIN_METADATA(IID IComponent_iid FILE "metadata.json")
+    Q_PLUGIN_METADATA(IID IComponent_iid FILE "../metadata.json")
+
 public:
-    QWidget* createWidget(LogosAPI* logosAPI = nullptr) override;
+    explicit ${pascal}Plugin(QObject* parent = nullptr);
+    ~${pascal}Plugin();
+
+    Q_INVOKABLE QWidget* createWidget(LogosAPI* logosAPI = nullptr) override;
     void destroyWidget(QWidget* widget) override;
 };
 `,
@@ -310,19 +360,48 @@ public:
   );
 
   writeFile(
-    path.join(dir, `src/${pascal}Plugin.cpp`),
-    `#include "${pascal}Plugin.h"
+    path.join(dir, `src/${name}_plugin.cpp`),
+    `#include "${name}_plugin.h"
 #include "${pascal}Backend.h"
+#include <QDebug>
+#include <QDir>
+#include <QString>
+#include <QtGlobal>
 #include <QQuickWidget>
 #include <QQmlContext>
+#include <QQuickStyle>
+#include <QUrl>
+
+${pascal}Plugin::${pascal}Plugin(QObject* parent) : QObject(parent) {}
+${pascal}Plugin::~${pascal}Plugin() {}
 
 QWidget* ${pascal}Plugin::createWidget(LogosAPI* logosAPI) {
-    auto* widget = new QQuickWidget;
-    auto* backend = new ${pascal}Backend(logosAPI, widget);
-    widget->rootContext()->setContextProperty("backend", backend);
-    widget->setSource(QUrl("qrc:/qml/Main.qml"));
-    widget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    return widget;
+    QQuickStyle::setStyle("Basic");
+
+    auto* quickWidget = new QQuickWidget();
+    quickWidget->setMinimumSize(800, 600);
+    quickWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+
+    auto* backend = new ${pascal}Backend(logosAPI, quickWidget);
+    quickWidget->rootContext()->setContextProperty("backend", backend);
+
+    // Dev mode: set QML_PATH to the directory containing Main.qml to load from disk without rebuilding.
+    // Example: export QML_PATH=$PWD/src/qml
+    const QString devSource = QString::fromUtf8(qgetenv("QML_PATH"));
+    const QUrl qmlUrl = devSource.isEmpty()
+        ? QUrl("qrc:/src/qml/Main.qml")
+        : QUrl::fromLocalFile(QDir(devSource).filePath("Main.qml"));
+
+    quickWidget->setSource(qmlUrl);
+
+    if (quickWidget->status() == QQuickWidget::Error) {
+        qWarning() << "${pascal}Plugin: failed to load QML from" << qmlUrl;
+        for (const auto& e : quickWidget->errors()) {
+            qWarning() << e.toString();
+        }
+    }
+
+    return quickWidget;
 }
 
 void ${pascal}Plugin::destroyWidget(QWidget* widget) {
@@ -335,7 +414,9 @@ void ${pascal}Plugin::destroyWidget(QWidget* widget) {
   writeFile(
     path.join(dir, `src/${pascal}Backend.h`),
     `#pragma once
+
 #include <QObject>
+#include <QString>
 #include <QVariantList>
 
 class LogosAPI;
@@ -343,19 +424,34 @@ class LogosAPI;
 class ${pascal}Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList items READ items NOTIFY itemsChanged)
+    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
+    Q_PROPERTY(int itemCount READ itemCount NOTIFY itemCountChanged)
+
 public:
     explicit ${pascal}Backend(LogosAPI* api, QObject* parent = nullptr);
-    QVariantList items() const;
 
-    Q_INVOKABLE void addItem(const QString& name);
+    QVariantList items() const;
+    QString statusMessage() const;
+    int itemCount() const;
+
+    Q_INVOKABLE void addNote(const QString& text);
     Q_INVOKABLE void removeItem(int index);
+    Q_INVOKABLE void clearAll();
 
 signals:
     void itemsChanged();
+    void statusMessageChanged();
+    void itemCountChanged();
+    void noteAdded(int index, const QString& text);
+    void noteRemoved(int index);
 
 private:
+    void setStatusMessage(const QString& message);
+    void bumpCounts();
+
     LogosAPI* m_api;
     QVariantList m_items;
+    QString m_statusMessage;
 };
 `,
     filesCreated
@@ -365,23 +461,80 @@ private:
     path.join(dir, `src/${pascal}Backend.cpp`),
     `#include "${pascal}Backend.h"
 
+#include <QDateTime>
+
 ${pascal}Backend::${pascal}Backend(LogosAPI* api, QObject* parent)
-    : QObject(parent), m_api(api) {}
+    : QObject(parent)
+    , m_api(api)
+{
+    Q_UNUSED(m_api);
+    setStatusMessage("Ready. Add a note below.");
+}
 
-QVariantList ${pascal}Backend::items() const { return m_items; }
+QVariantList ${pascal}Backend::items() const {
+    return m_items;
+}
 
-void ${pascal}Backend::addItem(const QString& name) {
-    QVariantMap item;
-    item["name"] = name;
-    m_items.append(item);
+QString ${pascal}Backend::statusMessage() const {
+    return m_statusMessage;
+}
+
+int ${pascal}Backend::itemCount() const {
+    return m_items.size();
+}
+
+void ${pascal}Backend::setStatusMessage(const QString& message) {
+    if (m_statusMessage == message) {
+        return;
+    }
+    m_statusMessage = message;
+    emit statusMessageChanged();
+}
+
+void ${pascal}Backend::bumpCounts() {
     emit itemsChanged();
+    emit itemCountChanged();
+}
+
+void ${pascal}Backend::addNote(const QString& text) {
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
+        setStatusMessage("Enter some text before adding a note.");
+        return;
+    }
+
+    QVariantMap row;
+    row["title"] = trimmed;
+    row["created"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    const int index = m_items.size();
+    m_items.append(row);
+    bumpCounts();
+    emit noteAdded(index, trimmed);
+    setStatusMessage(QString("Added note (%1 total).").arg(m_items.size()));
 }
 
 void ${pascal}Backend::removeItem(int index) {
-    if (index >= 0 && index < m_items.size()) {
-        m_items.removeAt(index);
-        emit itemsChanged();
+    if (index < 0 || index >= m_items.size()) {
+        setStatusMessage("Invalid note index.");
+        return;
     }
+
+    m_items.removeAt(index);
+    bumpCounts();
+    emit noteRemoved(index);
+    setStatusMessage(m_items.isEmpty() ? "All notes cleared." : QString("Removed note (%1 left).").arg(m_items.size()));
+}
+
+void ${pascal}Backend::clearAll() {
+    if (m_items.isEmpty()) {
+        setStatusMessage("Nothing to clear.");
+        return;
+    }
+
+    m_items.clear();
+    bumpCounts();
+    setStatusMessage("Cleared all notes.");
 }
 `,
     filesCreated
@@ -394,32 +547,290 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
-    anchors.fill: parent
+    id: root
+    color: "#1e1e1e"
+
+    Connections {
+        target: backend
+
+        function onNoteAdded(index, text) {
+            noteField.clear()
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 24
+        spacing: 16
 
         Text {
             text: "${pascal}"
             font.pixelSize: 24
+            font.bold: true
+            color: "#ffffff"
         }
 
-        ListView {
+        Text {
+            text: "${qmlEscDescription}"
+            font.pixelSize: 14
+            color: "#a0a0a0"
+            wrapMode: Text.Wrap
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            model: backend.items
-            delegate: Text {
-                text: modelData.name
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 36
+            color: "#2d2d2d"
+            radius: 4
+            border.color: "#444444"
+            border.width: 1
+
+            TextField {
+                id: noteField
+                anchors.fill: parent
+                anchors.margins: 4
+                placeholderText: "Write a note…"
+                color: "#ffffff"
+                selectionColor: "#4A90E2"
+                background: Rectangle { color: "transparent" }
             }
         }
 
-        Button {
-            text: "Add Item"
-            onClicked: backend.addItem("New Item")
+        RowLayout {
+            spacing: 10
+
+            Button {
+                text: "Add note"
+                onClicked: backend.addNote(noteField.text)
+
+                contentItem: Text {
+                    text: parent.text
+                    font.pixelSize: 13
+                    color: parent.enabled ? "#ffffff" : "#808080"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                background: Rectangle {
+                    implicitWidth: 110
+                    implicitHeight: 32
+                    color: parent.enabled ? (parent.pressed ? "#1a7f37" : "#238636") : "#2d2d2d"
+                    radius: 4
+                    border.color: parent.enabled ? "#2ea043" : "#3d3d3d"
+                    border.width: 1
+                }
+            }
+
+            Button {
+                text: "Clear all"
+                enabled: backend.itemCount > 0
+                onClicked: backend.clearAll()
+
+                contentItem: Text {
+                    text: parent.text
+                    font.pixelSize: 13
+                    color: parent.enabled ? "#ffffff" : "#808080"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                background: Rectangle {
+                    implicitWidth: 100
+                    implicitHeight: 32
+                    color: parent.enabled ? (parent.pressed ? "#5c1a1a" : "#7a2a2a") : "#2d2d2d"
+                    radius: 4
+                    border.color: parent.enabled ? "#c62828" : "#3d3d3d"
+                    border.width: 1
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: "#252526"
+            radius: 6
+            border.color: "#333333"
+            border.width: 1
+
+            Text {
+                anchors.centerIn: parent
+                visible: backend.itemCount === 0
+                text: "No notes yet.\\nAdd one with the field above."
+                horizontalAlignment: Text.AlignHCenter
+                color: "#808080"
+                font.pixelSize: 14
+            }
+
+            ListView {
+                id: noteList
+                anchors.fill: parent
+                anchors.margins: 8
+                clip: true
+                visible: backend.itemCount > 0
+                model: backend.items
+                spacing: 6
+
+                delegate: Rectangle {
+                    width: ListView.view.width
+                    height: 56
+                    color: index % 2 === 0 ? "#2d2d2d" : "#333333"
+                    radius: 4
+                    border.color: mouseArea.containsMouse ? "#4A90E2" : "#444444"
+                    border.width: 1
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 12
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Text {
+                                text: modelData.title
+                                color: "#ffffff"
+                                font.pixelSize: 14
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+
+                            Text {
+                                text: modelData.created || ""
+                                color: "#a0a0a0"
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        Button {
+                            text: "Delete"
+                            onClicked: backend.removeItem(index)
+
+                            contentItem: Text {
+                                text: parent.text
+                                font.pixelSize: 12
+                                color: parent.enabled ? "#ffffff" : "#808080"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            background: Rectangle {
+                                implicitWidth: 72
+                                implicitHeight: 28
+                                color: parent.pressed ? "#5c1a1a" : "#7a2a2a"
+                                radius: 4
+                                border.color: "#c62828"
+                                border.width: 1
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 36
+            color: "#2d2d2d"
+            radius: 4
+            border.color: "#444444"
+            border.width: 1
+
+            Text {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.margins: 10
+                text: backend.statusMessage
+                color: "#c0c0c0"
+                font.pixelSize: 12
+                elide: Text.ElideRight
+            }
         }
     }
+}
+`,
+    filesCreated
+  );
+
+  writeFile(
+    path.join(dir, "CMakeLists.txt"),
+    `cmake_minimum_required(VERSION 3.14)
+project(${pascal}Plugin LANGUAGES CXX)
+
+set(CMAKE_AUTOMOC ON)
+
+if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
+    include($ENV{LOGOS_MODULE_BUILDER_ROOT}/cmake/LogosModule.cmake)
+else()
+    message(FATAL_ERROR "LogosModule.cmake not found. Set LOGOS_MODULE_BUILDER_ROOT.")
+endif()
+
+logos_module(
+    NAME ${name}
+    SOURCES
+        src/${name}_plugin.h
+        src/${name}_plugin.cpp
+        src/${pascal}Backend.h
+        src/${pascal}Backend.cpp
+    INCLUDE_DIRS
+        \${CMAKE_CURRENT_SOURCE_DIR}/interfaces
+)
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets Quick QuickWidgets QuickControls2)
+
+qt_add_resources(${name}_module_plugin ui_qml_resources
+    PREFIX "/"
+    FILES
+        src/qml/Main.qml
+)
+
+target_link_libraries(${name}_module_plugin PRIVATE
+    Qt6::Widgets
+    Qt6::Quick
+    Qt6::QuickWidgets
+    Qt6::QuickControls2
+)
+`,
+    filesCreated
+  );
+
+  writeFile(
+    path.join(dir, "flake.nix"),
+    `{
+  description = "${flakeEscDescription}";
+
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
+  };
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    let
+      base = logos-module-builder.lib.mkLogosModule {
+        src = ./.;
+        configFile = ./metadata.json;
+        flakeInputs = inputs;
+      };
+    in
+    base // (
+      if base ? apps then {
+        apps = builtins.mapAttrs (_system: apps:
+          apps // { app = apps.default; }
+        ) base.apps;
+      } else {}
+    );
 }
 `,
     filesCreated

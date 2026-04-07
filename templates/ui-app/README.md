@@ -1,19 +1,27 @@
 # UI App Template
 
-This template is used by `logos-dev-boost init <name> --type ui-app` to scaffold a new Basecamp UI app.
+This template documents what `logos-dev-boost init <name> --type ui-app` scaffolds (implemented in `mcp-server/tools/scaffold.ts`).
 
 ## Generated files
 
-- `src/<Name>Plugin.h/cpp` — IComponent implementation with createWidget/destroyWidget
-- `src/<Name>Backend.h/cpp` — QObject backend exposed to QML
-- `src/qml/Main.qml` — QML entry point
-- `metadata.json` — `"type": "ui"`
-- `CMakeLists.txt` — Qt6 Quick/QuickWidgets dependencies
-- `flake.nix` — Standard module builder config
+- `interfaces/IComponent.h` — vendored `IComponent` interface (same pattern as `logos-package-manager-ui` and other Basecamp UI plugins)
+- `src/<name>_plugin.h` / `src/<name>_plugin.cpp` — `IComponent` implementation: `QQuickWidget`, `QQuickStyle::setStyle("Basic")`, optional `QML_PATH` dev mode, loads `qrc:/src/qml/Main.qml` or `Main.qml` from `QML_PATH`
+- `src/<Pascal>Backend.h` / `src/<Pascal>Backend.cpp` — QObject backend with `Q_PROPERTY` / `Q_INVOKABLE` / signals (sample notes list + status line)
+- `src/qml/Main.qml` — dark-themed QML (toolbar, list, status bar)
+- `metadata.json` — `"type": "ui"`, `main`: `<name>_plugin`
+- `CMakeLists.txt` — `INCLUDE_DIRS` for `interfaces/`, `qt_add_resources` for QML, Qt6 Widgets/Quick/QuickWidgets/QuickControls2
+- `flake.nix` — `mkLogosModule` with `nix-bundle-lgx` input; adds `apps.<system>.app` as an alias of `default` so `nix run .#app` works
+- `.gitignore` — `result`, `build/`, `.DS_Store`
 
-## C++/QML Boundary
+## Dev mode (QML without rebuild)
 
-The generated code establishes the correct C++/QML boundary:
-- Business logic: C++ backend class (Q_PROPERTY + Q_INVOKABLE)
-- UI layout: QML with Logos.Theme and Logos.Controls
-- Bridge: Backend set as context property on QQuickWidget
+```bash
+export QML_PATH=$PWD/src/qml
+nix run .
+```
+
+## C++/QML boundary
+
+- Business logic: C++ backend (`Q_PROPERTY`, `Q_INVOKABLE`, signals)
+- UI: QML (`QtQuick` / `Controls` / `Layouts`); inside Basecamp you can also use `Logos.Theme` and `Logos.Controls`
+- Bridge: `backend` context property on the `QQuickWidget` root context
