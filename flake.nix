@@ -73,6 +73,11 @@
           type = "app";
           program = "${self.packages.${system}.default}/bin/logos-dev-boost";
         };
+        # Alias for `nix run .#app` (same as default)
+        app = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/logos-dev-boost";
+        };
         mcp-server = {
           type = "app";
           program = "${self.packages.${system}.default}/bin/logos-dev-boost-mcp";
