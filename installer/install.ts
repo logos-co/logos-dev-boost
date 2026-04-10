@@ -39,9 +39,13 @@ function detectProject(projectDir: string): DetectedProject {
   }
 
   // Fallback structural detection
-  if (fs.existsSync(path.join(projectDir, "module", "metadata.json")) &&
-      fs.existsSync(path.join(projectDir, "ui", "metadata.json"))) {
-    const moduleMeta = JSON.parse(fs.readFileSync(path.join(projectDir, "module", "metadata.json"), "utf-8"));
+  const entries = fs.existsSync(projectDir) ? fs.readdirSync(projectDir) : [];
+  const moduleEntry = entries.find((e: string) => e.endsWith("-module") &&
+    fs.existsSync(path.join(projectDir, e, "metadata.json")));
+  const uiEntry = entries.find((e: string) => e.endsWith("-ui") &&
+    fs.existsSync(path.join(projectDir, e, "metadata.json")));
+  if (moduleEntry && uiEntry) {
+    const moduleMeta = JSON.parse(fs.readFileSync(path.join(projectDir, moduleEntry, "metadata.json"), "utf-8"));
     result.name = moduleMeta.name || "unknown";
     result.type = "Full App (module + UI)";
     result.interface = "N/A";

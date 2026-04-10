@@ -75,10 +75,10 @@ function inspectProject(dir: string): ProjectInfo {
       info.projectType = "full-app";
       info.name = proj.name || "unknown";
       info.description = proj.description || "";
-      info.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
-      info.buildTargets = ["module", "ui", "default"];
-      const moduleDir = path.join(dir, proj.module || "module");
-      const uiDir = path.join(dir, proj.ui || "ui");
+      info.hasFlake = false;  // no root flake.nix in full-app layout
+      info.buildTargets = [`${proj.module || `${proj.name}-module`}`, `${proj.ui || `${proj.name}-ui`}`];
+      const moduleDir = path.join(dir, proj.module || `${proj.name}-module`);
+      const uiDir = path.join(dir, proj.ui || `${proj.name}-ui`);
       if (fs.existsSync(moduleDir)) {
         info.module = inspectProject(moduleDir);
       }
@@ -89,15 +89,18 @@ function inspectProject(dir: string): ProjectInfo {
     }
   }
 
-  // Fallback: detect by subdirectories
-  const hasModuleDir = fs.existsSync(path.join(dir, "module", "metadata.json"));
-  const hasUiDir = fs.existsSync(path.join(dir, "ui", "metadata.json"));
-  if (hasModuleDir && hasUiDir) {
+  // Fallback: scan for <name>-module / <name>-ui sibling directories
+  const entries = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const moduleEntry = entries.find((e: string) => e.endsWith("-module") &&
+    fs.existsSync(path.join(dir, e, "metadata.json")));
+  const uiEntry = entries.find((e: string) => e.endsWith("-ui") &&
+    fs.existsSync(path.join(dir, e, "metadata.json")));
+  if (moduleEntry && uiEntry) {
     info.projectType = "full-app";
-    info.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
-    info.buildTargets = ["module", "ui", "default"];
-    info.module = inspectProject(path.join(dir, "module"));
-    info.ui = inspectProject(path.join(dir, "ui"));
+    info.hasFlake = false;
+    info.buildTargets = [moduleEntry, uiEntry];
+    info.module = inspectProject(path.join(dir, moduleEntry));
+    info.ui = inspectProject(path.join(dir, uiEntry));
     info.name = info.module.name;
     info.description = info.module.description;
     return info;

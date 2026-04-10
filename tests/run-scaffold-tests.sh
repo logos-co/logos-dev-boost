@@ -65,13 +65,16 @@ run_one() {
   echo "  scaffolded: $proj"
 
   if [ "$type" = "full-app" ]; then
+    local module_subdir="${name//_/-}-module"
+    local ui_subdir="${name//_/-}-ui"
+
     # Verify sub-project directories were created
-    if [ ! -d "$proj/module" ]; then
-      echo "FAIL: full-app scaffold did not produce $proj/module/" >&2
+    if [ ! -d "$proj/$module_subdir" ]; then
+      echo "FAIL: full-app scaffold did not produce $proj/$module_subdir/" >&2
       exit 1
     fi
-    if [ ! -d "$proj/ui" ]; then
-      echo "FAIL: full-app scaffold did not produce $proj/ui/" >&2
+    if [ ! -d "$proj/$ui_subdir" ]; then
+      echo "FAIL: full-app scaffold did not produce $proj/$ui_subdir/" >&2
       exit 1
     fi
     if [ ! -f "$proj/project.json" ]; then
@@ -85,36 +88,36 @@ run_one() {
       *)      ext="so"    ;;
     esac
 
-    # Build module sub-project
-    echo "  building module sub-project..."
+    # Build module sub-project (needs its own git repo since it's a standalone flake)
+    echo "  building $module_subdir sub-project..."
     (
-      cd "$proj/module"
+      cd "$proj/$module_subdir"
       git init -q
       git add -A
       nix build -L
     )
-    local module_plugin="$proj/module/result/lib/${name}_plugin.$ext"
+    local module_plugin="$proj/$module_subdir/result/lib/${name}_plugin.$ext"
     if [ ! -f "$module_plugin" ]; then
       echo "FAIL: expected $module_plugin, not found" >&2
-      echo "  module/result contents:" >&2
-      ls -la "$proj/module/result/lib/" >&2 || true
+      echo "  $module_subdir/result contents:" >&2
+      ls -la "$proj/$module_subdir/result/lib/" >&2 || true
       exit 1
     fi
     echo "  OK: module ${name}_plugin.$ext built"
 
-    # Build UI sub-project
-    echo "  building ui sub-project..."
+    # Build UI sub-project (needs module to be git-tracked for path: input)
+    echo "  building $ui_subdir sub-project..."
     (
-      cd "$proj/ui"
+      cd "$proj/$ui_subdir"
       git init -q
       git add -A
       nix build -L
     )
-    local ui_plugin="$proj/ui/result/lib/${name}_ui_plugin.$ext"
+    local ui_plugin="$proj/$ui_subdir/result/lib/${name}_ui_plugin.$ext"
     if [ ! -f "$ui_plugin" ]; then
       echo "FAIL: expected $ui_plugin, not found" >&2
-      echo "  ui/result contents:" >&2
-      ls -la "$proj/ui/result/lib/" >&2 || true
+      echo "  $ui_subdir/result contents:" >&2
+      ls -la "$proj/$ui_subdir/result/lib/" >&2 || true
       exit 1
     fi
     echo "  OK: ui ${name}_ui_plugin.$ext built"

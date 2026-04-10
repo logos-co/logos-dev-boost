@@ -30,9 +30,11 @@ function detectProjectType(dir: string): {
   isUiApp: boolean;
   isFullApp: boolean;
   name: string;
+  moduleDir: string;
+  uiDir: string;
   hasFlake: boolean;
 } {
-  const result = { isUniversal: false, isUiApp: false, isFullApp: false, name: "unknown", hasFlake: false };
+  const result = { isUniversal: false, isUiApp: false, isFullApp: false, name: "unknown", moduleDir: "", uiDir: "", hasFlake: false };
 
   // Check for full-app
   const projectJsonPath = path.join(dir, "project.json");
@@ -41,18 +43,26 @@ function detectProjectType(dir: string): {
     if (proj.type === "full-app") {
       result.isFullApp = true;
       result.name = proj.name || "unknown";
-      result.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
+      result.moduleDir = proj.module || `${proj.name}-module`;
+      result.uiDir = proj.ui || `${proj.name}-ui`;
+      result.hasFlake = false;
       return result;
     }
   }
 
   // Fallback structural detection
-  if (fs.existsSync(path.join(dir, "module", "metadata.json")) &&
-      fs.existsSync(path.join(dir, "ui", "metadata.json"))) {
-    const moduleMeta = JSON.parse(fs.readFileSync(path.join(dir, "module", "metadata.json"), "utf-8"));
+  const entries = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const moduleEntry = entries.find((e: string) => e.endsWith("-module") &&
+    fs.existsSync(path.join(dir, e, "metadata.json")));
+  const uiEntry = entries.find((e: string) => e.endsWith("-ui") &&
+    fs.existsSync(path.join(dir, e, "metadata.json")));
+  if (moduleEntry && uiEntry) {
+    const moduleMeta = JSON.parse(fs.readFileSync(path.join(dir, moduleEntry, "metadata.json"), "utf-8"));
     result.isFullApp = true;
     result.name = moduleMeta.name || "unknown";
-    result.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
+    result.moduleDir = moduleEntry;
+    result.uiDir = uiEntry;
+    result.hasFlake = false;
     return result;
   }
 
@@ -109,20 +119,15 @@ export function handleBuildHelp(args: Record<string, unknown>) {
   };
 }
 
-function buildHelp(project: { isUniversal: boolean; isFullApp: boolean; name: string; hasFlake: boolean }): string {
+function buildHelp(project: { isUniversal: boolean; isFullApp: boolean; name: string; moduleDir: string; uiDir: string; hasFlake: boolean }): string {
   const lines = ["## Build Commands\n"];
 
   if (project.isFullApp) {
+    lines.push("Each sub-project is a standalone flake. Build them independently:");
     lines.push("```bash");
-    lines.push("nix build .#module   # Build the module");
-    lines.push("nix build .#ui       # Build the UI app");
-    lines.push("nix build            # Build both (default: UI app)");
-    lines.push("nix build -L         # Build with streaming logs");
-    lines.push("```");
-    lines.push("\n### Build sub-projects independently\n");
-    lines.push("```bash");
-    lines.push("cd module && nix build");
-    lines.push("cd ui && nix build");
+    lines.push(`cd ${project.moduleDir} && git init && git add -A && nix build   # build the module`);
+    lines.push(`cd ${project.uiDir} && git init && git add -A && nix build       # build the UI app`);
+    lines.push("nix build -L   # (run inside sub-project dir) Build with streaming logs");
     lines.push("```");
     lines.push("\n### In the workspace\n");
     lines.push("```bash");
@@ -157,18 +162,18 @@ function buildHelp(project: { isUniversal: boolean; isFullApp: boolean; name: st
   return lines.join("\n");
 }
 
-function testHelp(project: { isUniversal: boolean; isFullApp: boolean; name: string }): string {
+function testHelp(project: { isUniversal: boolean; isFullApp: boolean; name: string; moduleDir: string; uiDir: string }): string {
   const lines = ["## Test Commands\n"];
   const pascal = project.name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
 
   if (project.isFullApp) {
     lines.push("### Module unit tests\n");
     lines.push("```bash");
-    lines.push("cd module && nix flake check -L");
+    lines.push(`cd ${project.moduleDir} && nix flake check -L`);
     lines.push("```\n");
     lines.push("### Integration test with logoscore\n");
     lines.push("```bash");
-    lines.push(`logoscore -m ./module/result/lib -l ${project.name} -c "${project.name}.methodName(args)"`);
+    lines.push(`logoscore -m ./${project.moduleDir}/result/lib -l ${project.name} -c "${project.name}.methodName(args)"`);
     lines.push("```\n");
     lines.push("### In the workspace\n");
     lines.push("```bash");
@@ -210,19 +215,21 @@ function testHelp(project: { isUniversal: boolean; isFullApp: boolean; name: str
   return lines.join("\n");
 }
 
-function runHelp(project: { isUniversal: boolean; isUiApp: boolean; isFullApp: boolean; name: string }): string {
+function runHelp(project: { isUniversal: boolean; isUiApp: boolean; isFullApp: boolean; name: string; moduleDir: string; uiDir: string }): string {
   if (project.isFullApp) {
     return `## Run Full App
 
 \`\`\`bash
-# Test module with logoscore
-nix build .#module
-logoscore -m ./module/result/lib -l ${project.name} -c "${project.name}.echo(hello)"
+# Build and test module
+cd ${project.moduleDir} && nix build
+logoscore -m ./${project.moduleDir}/result/lib -l ${project.name} -c "${project.name}.echo(hello)"
+
+# Build UI app
+cd ${project.uiDir} && nix build
 
 # Install both and launch in Basecamp
-nix build .#module .#ui
-cp -r module/result/lib/* ~/.local/share/Logos/LogosBasecampDev/modules/
-cp -r ui/result/* ~/.local/share/Logos/LogosBasecampDev/plugins/${project.name}_ui/
+cp -r ${project.moduleDir}/result/lib/* ~/.local/share/Logos/LogosBasecampDev/modules/
+cp -r ${project.uiDir}/result/* ~/.local/share/Logos/LogosBasecampDev/plugins/${project.name}_ui/
 \`\`\`
 
 The UI app declares the module as a dependency — Basecamp will auto-load the module when the UI plugin is activated.`;
@@ -252,24 +259,25 @@ logoscore -m ./result/lib -l ${project.name} -c "${project.name}.methodName(args
 \`\`\``;
 }
 
-function packageHelp(project: { name: string; isFullApp?: boolean }): string {
+function packageHelp(project: { name: string; isFullApp?: boolean; moduleDir?: string; uiDir?: string }): string {
   if (project.isFullApp) {
     return `## Package for Distribution
 
 \`\`\`bash
-# Build both
-nix build .#module .#ui
+# Build sub-projects
+cd ${project.moduleDir} && nix build && cd ..
+cd ${project.uiDir} && nix build && cd ..
 
 # Package the module
 lgx create ${project.name}
-lgx add ${project.name}.lgx -v linux-x86_64 -f ./module/result/lib/${project.name}_plugin.so
-lgx add ${project.name}.lgx -v darwin-arm64 -f ./module/result/lib/${project.name}_plugin.dylib
+lgx add ${project.name}.lgx -v linux-x86_64 -f ./${project.moduleDir}/result/lib/${project.name}_plugin.so
+lgx add ${project.name}.lgx -v darwin-arm64 -f ./${project.moduleDir}/result/lib/${project.name}_plugin.dylib
 lgx verify ${project.name}.lgx
 
 # Package the UI app
 lgx create ${project.name}_ui
-lgx add ${project.name}_ui.lgx -v linux-x86_64 -f ./ui/result/lib/${project.name}_ui_plugin.so
-lgx add ${project.name}_ui.lgx -v darwin-arm64 -f ./ui/result/lib/${project.name}_ui_plugin.dylib
+lgx add ${project.name}_ui.lgx -v linux-x86_64 -f ./${project.uiDir}/result/lib/${project.name}_ui_plugin.so
+lgx add ${project.name}_ui.lgx -v darwin-arm64 -f ./${project.uiDir}/result/lib/${project.name}_ui_plugin.dylib
 lgx verify ${project.name}_ui.lgx
 \`\`\``;
   }
@@ -355,8 +363,8 @@ function commonIssues(project: { isUniversal: boolean; isFullApp?: boolean }): s
   lines.push("5. **Binary name mismatch** — `name` in metadata.json must match the binary prefix");
 
   if (project.isFullApp) {
-    lines.push("6. **Root flake input paths** — Nix flake `path:./module` inputs require git tracking. Run `git add -A` in the root.");
-    lines.push("7. **Build target not found** — Use `nix build .#module` or `nix build .#ui`, not plain `nix build` to target sub-projects");
+    lines.push("6. **Each sub-project needs its own git init** — Run `git init && git add -A` inside each sub-directory before `nix build`");
+    lines.push("7. **Module input not found** — The ui flake.nix includes the module as an input via `path:../<name>-module`. Ensure the module dir exists at that relative path and is git-tracked.");
   }
 
   if (project.isUniversal) {

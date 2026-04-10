@@ -98,9 +98,9 @@ export function handleScaffold(args: Record<string, unknown>) {
               ? [
                   `cd ${path.basename(projectDir)}`,
                   "git init && git add -A",
-                  "nix build .#module   # build the module",
-                  "nix build .#ui       # build the UI app",
-                  `logoscore -m ./module/result/lib -l ${name} -c "${name}.echo(hello)"`,
+                  `cd ${name}-module && git init && git add -A && nix build`,
+                  `cd ../${name}-ui && git init && git add -A && nix build`,
+                  `logoscore -m ./${name}-module/result/lib -l ${name} -c "${name}.echo(hello)"`,
                 ]
               : [
                   `cd ${path.basename(projectDir)}`,
@@ -707,46 +707,55 @@ function createFullApp(
   description: string,
   filesCreated: string[]
 ) {
-  const pascal = toPascalCase(name);
   const uiName = `${name}_ui`;
+  const moduleDir = path.join(dir, `${name}-module`);
+  const uiDir = path.join(dir, `${name}-ui`);
 
   // Scaffold the module sub-project
-  createUniversalModule(path.join(dir, "module"), name, description, false, filesCreated);
+  createUniversalModule(moduleDir, name, description, false, filesCreated);
 
   // Scaffold the UI sub-project (named <name>_ui)
-  createQmlBackendApp(path.join(dir, "ui"), uiName, description, filesCreated);
+  createQmlBackendApp(uiDir, uiName, description, filesCreated);
 
-  // Patch ui/metadata.json to declare the module as a dependency
-  const uiMetadataPath = path.join(dir, "ui", "metadata.json");
+  // Patch ui/metadata.json to declare the module as a runtime dependency
+  const uiMetadataPath = path.join(uiDir, "metadata.json");
   const uiMetadata = JSON.parse(fs.readFileSync(uiMetadataPath, "utf-8"));
   uiMetadata.dependencies = [name];
   fs.writeFileSync(uiMetadataPath, JSON.stringify(uiMetadata, null, 2) + "\n");
 
-  // Root flake.nix — composes both sub-flakes
-  writeFile(
-    path.join(dir, "flake.nix"),
+  // Overwrite ui/flake.nix to add the module as a flake input so
+  // logos-module-builder can resolve the runtime dependency declaration.
+  const flakeEscDescription = description.replace(/"/g, '\\"').replace(/\r?\n/g, " ");
+  // Use fs.writeFileSync directly (not writeFile) to avoid a duplicate entry in
+  // filesCreated — createUiApp() already tracked this path.
+  fs.writeFileSync(
+    path.join(uiDir, "flake.nix"),
     `{
-  description = "Logos ${pascal} — module + UI app";
+  description = "${flakeEscDescription}";
 
   inputs = {
-    module.url = "path:./module";
-    ui.url = "path:./ui";
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
+    ${name}.url = "path:../${name}-module";
   };
 
-  outputs = { module, ui, ... }:
+  outputs = inputs@{ logos-module-builder, ... }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-      forAllSystems = f: builtins.listToAttrs (map (s: { name = s; value = f s; }) systems);
-    in {
-      packages = forAllSystems (system: {
-        module = module.packages.\${system}.default;
-        ui = ui.packages.\${system}.default;
-        default = ui.packages.\${system}.default;
-      });
-    };
+      base = logos-module-builder.lib.mkLogosModule {
+        src = ./.;
+        configFile = ./metadata.json;
+        flakeInputs = inputs;
+      };
+    in
+    base // (
+      if base ? apps then {
+        apps = builtins.mapAttrs (_system: apps:
+          apps // { app = apps.default; }
+        ) base.apps;
+      } else {}
+    );
 }
-`,
-    filesCreated
+`
   );
 
   // Root project.json — metadata for AI context generators
@@ -757,8 +766,8 @@ function createFullApp(
         type: "full-app",
         name,
         description,
-        module: "module/",
-        ui: "ui/",
+        module: `${name}-module`,
+        ui: `${name}-ui`,
       },
       null,
       2

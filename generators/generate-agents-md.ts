@@ -10,6 +10,8 @@ interface ProjectInfo {
   // full-app only
   moduleName?: string;
   uiName?: string;
+  moduleDir?: string;   // relative path e.g. "tictactoe-module"
+  uiDir?: string;       // relative path e.g. "tictactoe-ui"
 }
 
 function detectProject(projectDir: string): ProjectInfo {
@@ -31,20 +33,27 @@ function detectProject(projectDir: string): ProjectInfo {
       info.description = proj.description || "";
       info.moduleName = proj.name;
       info.uiName = `${proj.name}_ui`;
+      info.moduleDir = proj.module || `${proj.name}-module`;
+      info.uiDir = proj.ui || `${proj.name}-ui`;
       return info;
     }
   }
 
-  // Fallback: detect by presence of module/ + ui/ subdirectories
-  const hasModuleDir = fs.existsSync(path.join(projectDir, "module", "metadata.json"));
-  const hasUiDir = fs.existsSync(path.join(projectDir, "ui", "metadata.json"));
-  if (hasModuleDir && hasUiDir) {
-    const moduleMeta = JSON.parse(fs.readFileSync(path.join(projectDir, "module", "metadata.json"), "utf-8"));
+  // Fallback: scan for <name>-module / <name>-ui sibling directories
+  const entries = fs.existsSync(projectDir) ? fs.readdirSync(projectDir) : [];
+  const moduleEntry = entries.find((e: string) => e.endsWith("-module") &&
+    fs.existsSync(path.join(projectDir, e, "metadata.json")));
+  const uiEntry = entries.find((e: string) => e.endsWith("-ui") &&
+    fs.existsSync(path.join(projectDir, e, "metadata.json")));
+  if (moduleEntry && uiEntry) {
+    const moduleMeta = JSON.parse(fs.readFileSync(path.join(projectDir, moduleEntry, "metadata.json"), "utf-8"));
     info.name = moduleMeta.name || "unknown";
     info.type = "full-app";
     info.description = moduleMeta.description || "";
     info.moduleName = moduleMeta.name;
     info.uiName = `${moduleMeta.name}_ui`;
+    info.moduleDir = moduleEntry;
+    info.uiDir = uiEntry;
     return info;
   }
 
@@ -101,8 +110,8 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
     if (project.type === "full-app") {
       lines.push(`- **Name:** ${project.name}`);
       lines.push("- **Type:** Full App (module + UI app)");
-      lines.push(`- **Module:** \`module/\` — universal C++ module (\`${project.moduleName}\`)`);
-      lines.push(`- **UI App:** \`ui/\` — Basecamp UI plugin (\`${project.uiName}\`)`);
+      lines.push(`- **Module:** \`${project.moduleDir}/\` — universal C++ module (\`${project.moduleName}\`)`);
+      lines.push(`- **UI App:** \`${project.uiDir}/\` — Basecamp UI plugin (\`${project.uiName}\`)`);
       if (project.description) {
         lines.push(`- **Description:** ${project.description}`);
       }
@@ -141,12 +150,10 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("");
   lines.push("```bash");
   if (project.type === "full-app") {
-    lines.push("nix build .#module               # Build the module");
-    lines.push("nix build .#ui                   # Build the UI app");
-    lines.push("nix build                        # Build both (default: UI app)");
-    lines.push("nix build -L                     # Build with streaming logs");
-    lines.push("cd module && nix build            # Build module standalone");
-    lines.push("cd ui && nix build                # Build UI app standalone");
+    lines.push(`nix build                        # Build both (default: UI app)`);
+    lines.push(`nix build -L                     # Build with streaming logs`);
+    lines.push(`cd ${project.moduleDir} && nix build   # Build module standalone`);
+    lines.push(`cd ${project.uiDir} && nix build       # Build UI app standalone`);
   } else {
     lines.push("nix build                    # Build the module/app");
     lines.push("nix build -L                 # Build with streaming logs");
@@ -174,10 +181,10 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("```bash");
   if (project.type === "full-app") {
     lines.push(`# Test the module`);
-    lines.push(`logoscore -m ./module/result/lib -l ${project.moduleName} -c "${project.moduleName}.methodName(args)"`);
+    lines.push(`logoscore -m ./${project.moduleDir}/result/lib -l ${project.moduleName} -c "${project.moduleName}.methodName(args)"`);
     lines.push("");
     lines.push("# Inspect module methods");
-    lines.push(`lm ./module/result/lib/${project.moduleName}_plugin.so`);
+    lines.push(`lm ./${project.moduleDir}/result/lib/${project.moduleName}_plugin.so`);
   } else {
     lines.push("# Integration test with logoscore");
     if (project.name !== "unknown") {
@@ -203,10 +210,10 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("```bash");
   if (project.type === "full-app") {
     lines.push(`lgx create ${project.moduleName}`);
-    lines.push(`lgx add ${project.moduleName}.lgx -v linux-x86_64 -f ./module/result/lib/${project.moduleName}_plugin.so`);
+    lines.push(`lgx add ${project.moduleName}.lgx -v linux-x86_64 -f ./${project.moduleDir}/result/lib/${project.moduleName}_plugin.so`);
     lines.push(`lgx verify ${project.moduleName}.lgx`);
     lines.push(`lgx create ${project.uiName}`);
-    lines.push(`lgx add ${project.uiName}.lgx -v linux-x86_64 -f ./ui/result/lib/${project.uiName}_plugin.so`);
+    lines.push(`lgx add ${project.uiName}.lgx -v linux-x86_64 -f ./${project.uiDir}/result/lib/${project.uiName}_plugin.so`);
     lines.push(`lgx verify ${project.uiName}.lgx`);
   } else if (project.name !== "unknown") {
     lines.push(`lgx create ${project.name}`);

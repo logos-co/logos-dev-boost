@@ -16,29 +16,27 @@ When a project requires both a module and a UI, use the `full-app` layout:
 
 ```
 logos-<name>/                      # Open this in your IDE
-  module/                          # Universal C++ module (core backend)
+  <name>-module/                   # Universal C++ module (core backend)
     metadata.json                  # "type": "core", "interface": "universal"
-    flake.nix
+    flake.nix                      # standalone — cd <name>-module && nix build
     src/<name>_impl.h
     src/<name>_impl.cpp
-  ui/                              # Basecamp UI app (frontend)
+  <name>-ui/                       # Basecamp UI app (frontend)
     metadata.json                  # "type": "ui_qml", "dependencies": ["<name>"]
-    flake.nix
+    flake.nix                      # includes <name>.url = "path:../<name>-module"
     src/<name>_ui_plugin.h/cpp
     src/<Pascal>UiBackend.h/cpp
     src/qml/Main.qml
-  flake.nix                        # Composes both: packages.module + packages.ui
   project.json                     # { "type": "full-app", "name": "<name>" }
   AGENTS.md / CLAUDE.md / .mcp.json
 ```
 
 Scaffold with: `logos-dev-boost init <name> --type full-app`
 
-Build commands:
+Each sub-project is a standalone flake — build inside the sub-directory:
 ```bash
-nix build .#module    # build the module
-nix build .#ui        # build the UI app
-nix build             # build both (default is UI app)
+cd <name>-module && git init && git add -A && nix build
+cd ../<name>-ui && git init && git add -A && nix build
 ```
 
 ## Module Naming
