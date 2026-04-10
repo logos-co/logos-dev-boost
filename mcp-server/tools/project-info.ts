@@ -31,6 +31,9 @@ interface ProjectInfo {
   nixInputs: Record<string, string>;
   cmakePackages: string[];
   externalLibraries: string[];
+  // full-app only
+  module?: ProjectInfo;
+  ui?: ProjectInfo;
 }
 
 export function handleProjectInfo(args: Record<string, unknown>) {
@@ -63,6 +66,42 @@ function inspectProject(dir: string): ProjectInfo {
     cmakePackages: [],
     externalLibraries: [],
   };
+
+  // Check for full-app root
+  const projectJsonPath = path.join(dir, "project.json");
+  if (fs.existsSync(projectJsonPath)) {
+    const proj = JSON.parse(fs.readFileSync(projectJsonPath, "utf-8"));
+    if (proj.type === "full-app") {
+      info.projectType = "full-app";
+      info.name = proj.name || "unknown";
+      info.description = proj.description || "";
+      info.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
+      info.buildTargets = ["module", "ui", "default"];
+      const moduleDir = path.join(dir, proj.module || "module");
+      const uiDir = path.join(dir, proj.ui || "ui");
+      if (fs.existsSync(moduleDir)) {
+        info.module = inspectProject(moduleDir);
+      }
+      if (fs.existsSync(uiDir)) {
+        info.ui = inspectProject(uiDir);
+      }
+      return info;
+    }
+  }
+
+  // Fallback: detect by subdirectories
+  const hasModuleDir = fs.existsSync(path.join(dir, "module", "metadata.json"));
+  const hasUiDir = fs.existsSync(path.join(dir, "ui", "metadata.json"));
+  if (hasModuleDir && hasUiDir) {
+    info.projectType = "full-app";
+    info.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
+    info.buildTargets = ["module", "ui", "default"];
+    info.module = inspectProject(path.join(dir, "module"));
+    info.ui = inspectProject(path.join(dir, "ui"));
+    info.name = info.module.name;
+    info.description = info.module.description;
+    return info;
+  }
 
   const metadataPath = path.join(dir, "metadata.json");
   if (fs.existsSync(metadataPath)) {

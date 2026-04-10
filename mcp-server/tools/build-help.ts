@@ -28,10 +28,33 @@ export const buildHelpTool: Tool = {
 function detectProjectType(dir: string): {
   isUniversal: boolean;
   isUiApp: boolean;
+  isFullApp: boolean;
   name: string;
   hasFlake: boolean;
 } {
-  const result = { isUniversal: false, isUiApp: false, name: "unknown", hasFlake: false };
+  const result = { isUniversal: false, isUiApp: false, isFullApp: false, name: "unknown", hasFlake: false };
+
+  // Check for full-app
+  const projectJsonPath = path.join(dir, "project.json");
+  if (fs.existsSync(projectJsonPath)) {
+    const proj = JSON.parse(fs.readFileSync(projectJsonPath, "utf-8"));
+    if (proj.type === "full-app") {
+      result.isFullApp = true;
+      result.name = proj.name || "unknown";
+      result.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
+      return result;
+    }
+  }
+
+  // Fallback structural detection
+  if (fs.existsSync(path.join(dir, "module", "metadata.json")) &&
+      fs.existsSync(path.join(dir, "ui", "metadata.json"))) {
+    const moduleMeta = JSON.parse(fs.readFileSync(path.join(dir, "module", "metadata.json"), "utf-8"));
+    result.isFullApp = true;
+    result.name = moduleMeta.name || "unknown";
+    result.hasFlake = fs.existsSync(path.join(dir, "flake.nix"));
+    return result;
+  }
 
   const metadataPath = path.join(dir, "metadata.json");
   if (fs.existsSync(metadataPath)) {
@@ -86,8 +109,28 @@ export function handleBuildHelp(args: Record<string, unknown>) {
   };
 }
 
-function buildHelp(project: { isUniversal: boolean; name: string; hasFlake: boolean }): string {
+function buildHelp(project: { isUniversal: boolean; isFullApp: boolean; name: string; hasFlake: boolean }): string {
   const lines = ["## Build Commands\n"];
+
+  if (project.isFullApp) {
+    lines.push("```bash");
+    lines.push("nix build .#module   # Build the module");
+    lines.push("nix build .#ui       # Build the UI app");
+    lines.push("nix build            # Build both (default: UI app)");
+    lines.push("nix build -L         # Build with streaming logs");
+    lines.push("```");
+    lines.push("\n### Build sub-projects independently\n");
+    lines.push("```bash");
+    lines.push("cd module && nix build");
+    lines.push("cd ui && nix build");
+    lines.push("```");
+    lines.push("\n### In the workspace\n");
+    lines.push("```bash");
+    lines.push(`ws build logos-${project.name.replace(/_/g, "-")}    # module`);
+    lines.push(`ws build logos-${project.name.replace(/_/g, "-")}-ui # UI app`);
+    lines.push("```");
+    return lines.join("\n");
+  }
 
   lines.push("```bash");
   lines.push("nix build          # Build the module/app");
@@ -114,9 +157,26 @@ function buildHelp(project: { isUniversal: boolean; name: string; hasFlake: bool
   return lines.join("\n");
 }
 
-function testHelp(project: { isUniversal: boolean; name: string }): string {
+function testHelp(project: { isUniversal: boolean; isFullApp: boolean; name: string }): string {
   const lines = ["## Test Commands\n"];
   const pascal = project.name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
+
+  if (project.isFullApp) {
+    lines.push("### Module unit tests\n");
+    lines.push("```bash");
+    lines.push("cd module && nix flake check -L");
+    lines.push("```\n");
+    lines.push("### Integration test with logoscore\n");
+    lines.push("```bash");
+    lines.push(`logoscore -m ./module/result/lib -l ${project.name} -c "${project.name}.methodName(args)"`);
+    lines.push("```\n");
+    lines.push("### In the workspace\n");
+    lines.push("```bash");
+    lines.push(`ws test logos-${project.name.replace(/_/g, "-")}`);
+    lines.push(`ws test logos-${project.name.replace(/_/g, "-")}-ui`);
+    lines.push("```");
+    return lines.join("\n");
+  }
 
   if (project.isUniversal) {
     lines.push("### Unit Tests (logos-test-framework)\n");
@@ -150,7 +210,23 @@ function testHelp(project: { isUniversal: boolean; name: string }): string {
   return lines.join("\n");
 }
 
-function runHelp(project: { isUniversal: boolean; isUiApp: boolean; name: string }): string {
+function runHelp(project: { isUniversal: boolean; isUiApp: boolean; isFullApp: boolean; name: string }): string {
+  if (project.isFullApp) {
+    return `## Run Full App
+
+\`\`\`bash
+# Test module with logoscore
+nix build .#module
+logoscore -m ./module/result/lib -l ${project.name} -c "${project.name}.echo(hello)"
+
+# Install both and launch in Basecamp
+nix build .#module .#ui
+cp -r module/result/lib/* ~/.local/share/Logos/LogosBasecampDev/modules/
+cp -r ui/result/* ~/.local/share/Logos/LogosBasecampDev/plugins/${project.name}_ui/
+\`\`\`
+
+The UI app declares the module as a dependency — Basecamp will auto-load the module when the UI plugin is activated.`;
+  }
   if (project.isUiApp) {
     return `## Run UI App
 
@@ -176,7 +252,27 @@ logoscore -m ./result/lib -l ${project.name} -c "${project.name}.methodName(args
 \`\`\``;
 }
 
-function packageHelp(project: { name: string }): string {
+function packageHelp(project: { name: string; isFullApp?: boolean }): string {
+  if (project.isFullApp) {
+    return `## Package for Distribution
+
+\`\`\`bash
+# Build both
+nix build .#module .#ui
+
+# Package the module
+lgx create ${project.name}
+lgx add ${project.name}.lgx -v linux-x86_64 -f ./module/result/lib/${project.name}_plugin.so
+lgx add ${project.name}.lgx -v darwin-arm64 -f ./module/result/lib/${project.name}_plugin.dylib
+lgx verify ${project.name}.lgx
+
+# Package the UI app
+lgx create ${project.name}_ui
+lgx add ${project.name}_ui.lgx -v linux-x86_64 -f ./ui/result/lib/${project.name}_ui_plugin.so
+lgx add ${project.name}_ui.lgx -v darwin-arm64 -f ./ui/result/lib/${project.name}_ui_plugin.dylib
+lgx verify ${project.name}_ui.lgx
+\`\`\``;
+  }
   return `## Package for Distribution
 
 \`\`\`bash
@@ -249,7 +345,7 @@ function troubleshoot(error: string, project: { isUniversal: boolean; name: stri
   return lines.join("\n");
 }
 
-function commonIssues(project: { isUniversal: boolean }): string {
+function commonIssues(project: { isUniversal: boolean; isFullApp?: boolean }): string {
   const lines = ["## Common Issues\n"];
 
   lines.push("1. **'Not a git repository'** — Run `git init && git add -A`");
@@ -257,6 +353,11 @@ function commonIssues(project: { isUniversal: boolean }): string {
   lines.push("3. **Qt version mismatch** — Qt comes from logos-cpp-sdk, never install separately");
   lines.push("4. **Missing dependencies** — Add to `metadata.json` `nix.packages.runtime`");
   lines.push("5. **Binary name mismatch** — `name` in metadata.json must match the binary prefix");
+
+  if (project.isFullApp) {
+    lines.push("6. **Root flake input paths** — Nix flake `path:./module` inputs require git tracking. Run `git add -A` in the root.");
+    lines.push("7. **Build target not found** — Use `nix build .#module` or `nix build .#ui`, not plain `nix build` to target sub-projects");
+  }
 
   if (project.isUniversal) {
     lines.push("6. **Generated files not found** — Check `preConfigure` runs logos-cpp-generator");

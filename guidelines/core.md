@@ -8,7 +8,38 @@ Logos has two fundamentally different types of components. Always identify which
 
 **UI Apps** (`"type": "ui_qml"`) — QML-based UI apps displayed as tabs in Basecamp's MDI workspace. Two subtypes: pure QML (no C++, calls modules via `logos.callModule()`) or QML + C++ backend (process-isolated via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
-**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, ui_qml). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it, or use a QML + backend app.
+**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, ui_qml). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it, or use a QML + backend app. The `full-app` scaffold type does exactly this — it creates a `module/` subdirectory (core) and a `ui/` subdirectory (UI app) with a shared root.
+
+## Full App Layout
+
+When a project requires both a module and a UI, use the `full-app` layout:
+
+```
+logos-<name>/                      # Open this in your IDE
+  module/                          # Universal C++ module (core backend)
+    metadata.json                  # "type": "core", "interface": "universal"
+    flake.nix
+    src/<name>_impl.h
+    src/<name>_impl.cpp
+  ui/                              # Basecamp UI app (frontend)
+    metadata.json                  # "type": "ui_qml", "dependencies": ["<name>"]
+    flake.nix
+    src/<name>_ui_plugin.h/cpp
+    src/<Pascal>UiBackend.h/cpp
+    src/qml/Main.qml
+  flake.nix                        # Composes both: packages.module + packages.ui
+  project.json                     # { "type": "full-app", "name": "<name>" }
+  AGENTS.md / CLAUDE.md / .mcp.json
+```
+
+Scaffold with: `logos-dev-boost init <name> --type full-app`
+
+Build commands:
+```bash
+nix build .#module    # build the module
+nix build .#ui        # build the UI app
+nix build             # build both (default is UI app)
+```
 
 ## Module Naming
 

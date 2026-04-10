@@ -15,8 +15,8 @@ export const scaffoldTool: Tool = {
       },
       type: {
         type: "string",
-        enum: ["module", "ui-qml", "ui-qml-backend"],
-        description: "Project type: 'module' for universal C++ module, 'ui-qml' for pure QML UI app, 'ui-qml-backend' for QML + C++ backend UI app",
+        enum: ["module", "ui-qml", "ui-qml-backend", "full-app"],
+        description: "Project type: 'module' for universal C++ module, 'ui-qml' for pure QML UI app, 'ui-qml-backend' for QML + C++ backend UI app, 'full-app' for both module + UI app together",
       },
       description: {
         type: "string",
@@ -42,7 +42,7 @@ function toPascalCase(name: string): string {
 export function handleScaffold(args: Record<string, unknown>) {
   const name = args.name as string;
   const type = args.type as string;
-  const description = (args.description as string) || `Logos ${type === "module" ? "module" : "UI app"}`;
+  const description = (args.description as string) || `Logos ${type === "module" ? "module" : type === "full-app" ? "module + UI app" : "UI app"}`;
   const externalLib = (args.externalLib as boolean) || false;
   const parentDir = (args.directory as string) || process.cwd();
 
@@ -80,6 +80,8 @@ export function handleScaffold(args: Record<string, unknown>) {
     createQmlApp(projectDir, name, description, filesCreated);
   } else if (type === "ui-qml-backend") {
     createQmlBackendApp(projectDir, name, description, filesCreated);
+  } else if (type === "full-app") {
+    createFullApp(projectDir, name, description, filesCreated);
   }
 
   const relFiles = filesCreated.map((f) => path.relative(parentDir, f));
@@ -92,17 +94,25 @@ export function handleScaffold(args: Record<string, unknown>) {
           {
             project_dir: projectDir,
             files_created: relFiles,
-            next_steps: [
-              `cd ${path.basename(projectDir)}`,
-              "git init && git add -A",
-              "nix build",
-              ...(type === "module"
-                ? [
-                    "nix build .#unit-tests -L",
-                    `logoscore -m ./result/lib -l ${name} -c "${name}.methodName(args)"`,
-                  ]
-                : [`nix run .`]),
-            ],
+            next_steps: type === "full-app"
+              ? [
+                  `cd ${path.basename(projectDir)}`,
+                  "git init && git add -A",
+                  "nix build .#module   # build the module",
+                  "nix build .#ui       # build the UI app",
+                  `logoscore -m ./module/result/lib -l ${name} -c "${name}.echo(hello)"`,
+                ]
+              : [
+                  `cd ${path.basename(projectDir)}`,
+                  "git init && git add -A",
+                  "nix build",
+                  ...(type === "module"
+                    ? [
+                        "nix build .#unit-tests -L",
+                        `logoscore -m ./result/lib -l ${name} -c "${name}.methodName(args)"`,
+                      ]
+                    : [`nix run .`]),
+                ],
           },
           null,
           2
@@ -686,6 +696,82 @@ logos_module(
       flakeInputs = inputs;
     };
 }
+`,
+    filesCreated
+  );
+}
+
+function createFullApp(
+  dir: string,
+  name: string,
+  description: string,
+  filesCreated: string[]
+) {
+  const pascal = toPascalCase(name);
+  const uiName = `${name}_ui`;
+
+  // Scaffold the module sub-project
+  createUniversalModule(path.join(dir, "module"), name, description, false, filesCreated);
+
+  // Scaffold the UI sub-project (named <name>_ui)
+  createQmlBackendApp(path.join(dir, "ui"), uiName, description, filesCreated);
+
+  // Patch ui/metadata.json to declare the module as a dependency
+  const uiMetadataPath = path.join(dir, "ui", "metadata.json");
+  const uiMetadata = JSON.parse(fs.readFileSync(uiMetadataPath, "utf-8"));
+  uiMetadata.dependencies = [name];
+  fs.writeFileSync(uiMetadataPath, JSON.stringify(uiMetadata, null, 2) + "\n");
+
+  // Root flake.nix — composes both sub-flakes
+  writeFile(
+    path.join(dir, "flake.nix"),
+    `{
+  description = "Logos ${pascal} — module + UI app";
+
+  inputs = {
+    module.url = "path:./module";
+    ui.url = "path:./ui";
+  };
+
+  outputs = { module, ui, ... }:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: builtins.listToAttrs (map (s: { name = s; value = f s; }) systems);
+    in {
+      packages = forAllSystems (system: {
+        module = module.packages.\${system}.default;
+        ui = ui.packages.\${system}.default;
+        default = ui.packages.\${system}.default;
+      });
+    };
+}
+`,
+    filesCreated
+  );
+
+  // Root project.json — metadata for AI context generators
+  writeFile(
+    path.join(dir, "project.json"),
+    JSON.stringify(
+      {
+        type: "full-app",
+        name,
+        description,
+        module: "module/",
+        ui: "ui/",
+      },
+      null,
+      2
+    ) + "\n",
+    filesCreated
+  );
+
+  // Root .gitignore
+  writeFile(
+    path.join(dir, ".gitignore"),
+    `.DS_Store
+result
+build/
 `,
     filesCreated
   );

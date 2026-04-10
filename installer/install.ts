@@ -25,6 +25,30 @@ function detectProject(projectDir: string): DetectedProject {
     description: "",
   };
 
+  // Check for full-app root
+  const projectJsonPath = path.join(projectDir, "project.json");
+  if (fs.existsSync(projectJsonPath)) {
+    const proj = JSON.parse(fs.readFileSync(projectJsonPath, "utf-8"));
+    if (proj.type === "full-app") {
+      result.name = proj.name || "unknown";
+      result.type = "Full App (module + UI)";
+      result.interface = "N/A";
+      result.description = proj.description || "";
+      return result;
+    }
+  }
+
+  // Fallback structural detection
+  if (fs.existsSync(path.join(projectDir, "module", "metadata.json")) &&
+      fs.existsSync(path.join(projectDir, "ui", "metadata.json"))) {
+    const moduleMeta = JSON.parse(fs.readFileSync(path.join(projectDir, "module", "metadata.json"), "utf-8"));
+    result.name = moduleMeta.name || "unknown";
+    result.type = "Full App (module + UI)";
+    result.interface = "N/A";
+    result.description = moduleMeta.description || "";
+    return result;
+  }
+
   const metadataPath = path.join(projectDir, "metadata.json");
   if (fs.existsSync(metadataPath)) {
     const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf-8"));
@@ -136,7 +160,7 @@ export async function runInstall(projectDir: string, boostDir: string) {
       generated.push("CLAUDE.md");
 
       copySkills(boostDir, projectDir, ".claude/skills");
-      generated.push(".claude/skills/ (8 skills)");
+      generated.push(".claude/skills/ (9 skills)");
     }
 
     if (tools.cursor) {
@@ -147,7 +171,7 @@ export async function runInstall(projectDir: string, boostDir: string) {
     // Install skills for non-Claude tools (use .agents/skills/)
     if (tools.codex || tools.gemini) {
       copySkills(boostDir, projectDir, ".agents/skills");
-      generated.push(".agents/skills/ (8 skills)");
+      generated.push(".agents/skills/ (9 skills)");
     }
 
     // Generate MCP configuration

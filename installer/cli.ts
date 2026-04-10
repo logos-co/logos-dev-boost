@@ -8,7 +8,7 @@ function printUsage() {
   console.log(`logos-dev-boost — AI-assisted development accelerator for Logos
 
 Usage:
-  logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend> [--external-lib]
+  logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend|full-app> [--external-lib]
   logos-dev-boost install
   logos-dev-boost generate [--agents-md] [--claude-md] [--cursor-rules] [--llms-txt]
   logos-dev-boost --help
@@ -22,7 +22,8 @@ Options:
   --type module           Universal C++ module (pure C++, generated Qt glue)
   --type ui-qml           Pure QML UI app for Basecamp (no C++)
   --type ui-qml-backend   QML + process-isolated C++ backend UI app
-  --external-lib      Include external library wrapping scaffold (modules only)
+  --type full-app         Both module + UI app as sibling subdirectories (recommended for most projects)
+  --external-lib          Include external library wrapping scaffold (modules only)
   --help              Show this help message
 `);
 }
@@ -39,7 +40,7 @@ async function main() {
     case "init": {
       const name = args[1];
       if (!name) {
-        console.error("Error: name is required. Usage: logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend>");
+        console.error("Error: name is required. Usage: logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend|full-app>");
         process.exit(1);
       }
 
@@ -47,8 +48,8 @@ async function main() {
       const type = typeIdx >= 0 ? args[typeIdx + 1] : "module";
       const externalLib = args.includes("--external-lib");
 
-      if (!["module", "ui-qml", "ui-qml-backend"].includes(type)) {
-        console.error("Error: --type must be 'module', 'ui-qml', or 'ui-qml-backend'");
+      if (!["module", "ui-qml", "ui-qml-backend", "full-app"].includes(type)) {
+        console.error("Error: --type must be 'module', 'ui-qml', 'ui-qml-backend', or 'full-app'");
         process.exit(1);
       }
 

@@ -49,7 +49,7 @@ The AI tool automatically picks up `CLAUDE.md`/`AGENTS.md` (always-loaded contex
 ### `init` — Scaffold a new project
 
 ```bash
-logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend> [--external-lib]
+logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend|full-app> [--external-lib]
 ```
 
 | Option | Description |
@@ -57,6 +57,7 @@ logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend> [--external-li
 | `--type module` | **Universal C++ module** (default). Pure C++ with `std::string`, `int64_t`, `std::vector<T>`. The build system generates all Qt glue via `logos-cpp-generator --from-header`. No Qt in your code. |
 | `--type ui-qml` | **Pure QML UI app**. QML-only Basecamp UI app with no C++ compilation. Calls backend modules via `logos.callModule()` bridge. |
 | `--type ui-qml-backend` | **QML + C++ backend UI app**. Process-isolated C++ backend (Qt Remote Objects) with QML frontend. Backend runs in `logos_host`, QML gets a typed replica via `logos.module()`. |
+| `--type full-app` | **Module + UI app together**. Creates a single root project with a `module/` subdirectory (universal C++ module) and a `ui/` subdirectory (Basecamp UI app). The UI declares the module as a dependency. Ideal when you need both a backend and a frontend. |
 | `--external-lib` | Include scaffold for wrapping an external C/C++ library (modules only). Adds Nix packaging for the external dependency and FFI bridge code. |
 
 Examples:
@@ -73,6 +74,29 @@ nix run github:logos-co/logos-dev-boost -- init notes_ui --type ui-qml
 
 # QML + C++ backend UI app
 nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-qml-backend
+
+# Module + UI app together (opens in IDE with full AI context for both)
+nix run github:logos-co/logos-dev-boost -- init notes --type full-app
+```
+
+The `full-app` type creates:
+
+```
+logos-notes/
+├── module/                    # Universal C++ module (backend)
+│   ├── src/notes_impl.h/cpp
+│   ├── metadata.json
+│   └── flake.nix
+├── ui/                        # Basecamp UI app (frontend)
+│   ├── src/notes_ui_plugin.h/cpp
+│   ├── src/NotesUiBackend.h/cpp
+│   ├── src/qml/Main.qml
+│   ├── metadata.json          # dependencies: ["notes"]
+│   └── flake.nix
+├── flake.nix                  # nix build .#module / .#ui
+├── project.json               # { "type": "full-app", ... }
+├── AGENTS.md / CLAUDE.md      # AI context covering both sub-projects
+└── .mcp.json / .claude/skills/
 ```
 
 ### `install` — Configure AI tools for an existing project
