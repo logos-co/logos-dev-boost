@@ -1,27 +1,49 @@
-# UI App Template
+# UI App Templates
 
-This template documents what `logos-dev-boost init <name> --type ui-app` scaffolds (implemented in `mcp-server/tools/scaffold.ts`).
+This documents what `logos-dev-boost init <name>` scaffolds for UI apps (implemented in `mcp-server/tools/scaffold.ts`).
 
-## Generated files
+## Pure QML (`--type ui-qml`)
 
-- `interfaces/IComponent.h` — vendored `IComponent` interface (same pattern as `logos-package-manager-ui` and other Basecamp UI plugins)
-- `src/<name>_plugin.h` / `src/<name>_plugin.cpp` — `IComponent` implementation: `QQuickWidget`, `QQuickStyle::setStyle("Basic")`, optional `QML_PATH` dev mode, loads `qrc:/src/qml/Main.qml` or `Main.qml` from `QML_PATH`
-- `src/<Pascal>Backend.h` / `src/<Pascal>Backend.cpp` — QObject backend with `Q_PROPERTY` / `Q_INVOKABLE` / signals (sample notes list + status line)
-- `src/qml/Main.qml` — dark-themed QML (toolbar, list, status bar)
-- `metadata.json` — `"type": "ui"`, `main`: `<name>_plugin`
-- `CMakeLists.txt` — `INCLUDE_DIRS` for `interfaces/`, `qt_add_resources` for QML, Qt6 Widgets/Quick/QuickWidgets/QuickControls2
-- `flake.nix` — `mkLogosModule` with `nix-bundle-lgx` input; adds `apps.<system>.app` as an alias of `default` so `nix run .#app` works
+### Generated files
+
+- `Main.qml` — QML entry point, uses `logos.callModule()` to call backend modules
+- `metadata.json` — `"type": "ui_qml"`, `"view": "Main.qml"`, no `"main"` field
+- `flake.nix` — `mkLogosQmlModule` (no preConfigure, no compilation)
 - `.gitignore` — `result`, `build/`, `.DS_Store`
 
-## Dev mode (QML without rebuild)
+### No C++ files
 
-```bash
-export QML_PATH=$PWD/src/qml
-nix run .
+Pure QML apps have no CMakeLists.txt, no C++ source files, and no compilation step. The QML is loaded directly by the host application.
+
+### Calling backend modules
+
+```qml
+var result = logos.callModule("module_name", "method", ["arg1", "arg2"])
 ```
 
-## C++/QML boundary
+The `logos` bridge is injected by the host (Basecamp or standalone runner).
 
-- Business logic: C++ backend (`Q_PROPERTY`, `Q_INVOKABLE`, signals)
-- UI: QML (`QtQuick` / `Controls` / `Layouts`); inside Basecamp you can also use `Logos.Theme` and `Logos.Controls`
-- Bridge: `backend` context property on the `QQuickWidget` root context
+---
+
+## QML + C++ Backend (`--type ui-qml-backend`)
+
+### Generated files
+
+- `src/<name>.rep` — Qt Remote Objects interface definition (PROP + SLOT declarations)
+- `src/<name>_interface.h` — extends `PluginInterface`, declares Qt plugin interface IID
+- `src/<name>_plugin.h` / `src/<name>_plugin.cpp` — plugin class inheriting `<Pascal>SimpleSource` + `<Pascal>Interface` + `<Pascal>ViewPluginBase`; uses `initLogos()` + `setBackend(this)`
+- `src/qml/Main.qml` — QML frontend using `logos.module("name")` for typed replica, `logos.watch()` for async calls
+- `metadata.json` — `"type": "ui_qml"`, `"main": "<name>_plugin"`, `"view": "qml/Main.qml"`
+- `CMakeLists.txt` — `logos_module()` with `REP_FILE` for Qt Remote Objects code generation
+- `flake.nix` — `mkLogosQmlModule`
+- `.gitignore` — `result`, `build/`, `.DS_Store`
+
+### Architecture
+
+The C++ backend runs in a **separate isolated process** (`logos_host`), communicating with the QML frontend via Qt Remote Objects IPC. Properties defined in the `.rep` file auto-sync to QML replicas. Slots are callable from QML via `logos.watch()`.
+
+### QML API
+
+- `logos.module("name")` — returns a typed Qt Remote Objects replica
+- `logos.isViewModuleReady("name")` — checks backend connection status
+- `logos.watch(pendingReply, onSuccess, onError)` — handles async slot calls

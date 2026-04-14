@@ -11,7 +11,7 @@ logos-dev-boost/
 ├── guidelines/                       # Always-loaded AI conventions
 │   ├── core.md                       # Two component types, naming, file structure
 │   ├── universal-module.md           # Pure C++ impl pattern, type mapping, codegen
-│   ├── ui-app.md                     # IComponent, C++/QML boundary, backend pattern
+│   ├── ui-app.md                     # ui_qml apps: pure QML + QML with C++ backend
 │   ├── nix-build.md                  # Flake structure, build commands, overrides
 │   ├── testing.md                    # logoscore, unit tests, TEST_GROUPS
 │   ├── metadata-json.md              # Full metadata.json schema
@@ -19,7 +19,7 @@ logos-dev-boost/
 ├── skills/                           # On-demand task knowledge (agentskills.io)
 │   ├── create-universal-module/      # Scaffold + implement a universal C++ module
 │   ├── wrap-external-lib/            # Wrap a C/C++ library as a module
-│   ├── create-ui-app/                # IComponent + QML UI app for Basecamp
+│   ├── create-ui-app/                # QML UI app for Basecamp (pure QML or QML + backend)
 │   ├── package-lgx/                  # Create + distribute LGX packages
 │   ├── inter-module-comm/            # LogosAPI patterns, dependency declaration
 │   ├── testing-modules/              # logoscore + unit testing patterns
@@ -28,7 +28,7 @@ logos-dev-boost/
 ├── templates/                        # Scaffolding templates (used by init command)
 │   ├── universal-module/             # Pure C++ module
 │   ├── universal-module-extlib/      # With external library wrapping
-│   └── ui-app/                       # IComponent + QML app
+│   └── ui-app/                       # QML UI app (pure QML + QML with backend)
 ├── generators/                       # Context file generators (TypeScript)
 │   ├── generate-agents-md.ts         # AGENTS.md with compressed docs index
 │   ├── generate-claude-md.ts         # CLAUDE.md (imports AGENTS.md content)
@@ -80,7 +80,7 @@ Guidelines are Markdown files loaded into the always-on context (AGENTS.md / CLA
 |-----------|---------|
 | `core.md` | Two component types (Universal Module vs UI App), naming conventions, file structure, `metadata.json` as source of truth |
 | `universal-module.md` | Pure C++ impl pattern, type mapping table, `"interface": "universal"`, impl class naming (`<name>_impl.h`), public methods = module API |
-| `ui-app.md` | `IComponent` pattern, C++/QML boundary table, `QObject` backend with `Q_PROPERTY`/`Q_INVOKABLE`, `LogosQmlBridge` |
+| `ui-app.md` | `ui_qml` apps: pure QML (logos.callModule bridge) and QML + C++ backend (Qt Remote Objects, .rep file, SimpleSource + ViewPluginBase, logos.module() replica) |
 | `nix-build.md` | Flake structure, `follows` declarations, `preConfigure` for codegen, build commands, `--auto-local` |
 | `testing.md` | Unit tests (call impl class directly), logoscore integration tests, `TEST_GROUPS`, `nix flake check` |
 | `metadata-json.md` | Full schema including `"interface"`, `"dependencies"`, `"nix"` config, `"external_libraries"`, `"cmake"` settings |
@@ -94,7 +94,7 @@ Skills are on-demand knowledge modules following the agentskills.io specificatio
 |-------|---------|---------|
 | `create-universal-module` | Creating a new Logos module | Full scaffold: metadata.json, flake.nix with preConfigure, CMakeLists.txt, impl header template |
 | `wrap-external-lib` | Wrapping a C/C++ library | External library config, `extern "C"` patterns, based on logos-accounts-module |
-| `create-ui-app` | Creating a Basecamp UI app | IComponent scaffold, QQuickWidget, QML Main.qml, backend class |
+| `create-ui-app` | Creating a Basecamp UI app | Two paths: pure QML (Main.qml + logos.callModule) or QML + C++ backend (.rep, SimpleSource, ViewPluginBase, logos.module replica) |
 | `package-lgx` | Packaging for distribution | lgx create/add/verify workflow, portable builds, nix-bundle-lgx |
 | `inter-module-comm` | Module-to-module calls | `LogosAPI::callModule()`, dependency declaration, `LogosResult` handling |
 | `testing-modules` | Writing tests | Unit tests, logoscore integration, TEST_GROUPS, mock transport |
@@ -112,7 +112,7 @@ TypeScript scripts that produce IDE-specific context files from the guidelines a
 | `generate-cursor-rules.ts` | `.cursor/rules/logos.mdc` | Cursor-specific rules with file glob patterns for activation. |
 | `generate-llms-txt.ts` | `llms.txt`, `llms-full.txt` | Machine-readable documentation index following the llms.txt specification. |
 
-Generators detect the project type from `metadata.json` (`"interface": "universal"` vs `"type": "ui"`) and include context specific to that project type.
+Generators detect the project type from `metadata.json` (`"interface": "universal"` vs `"type": "ui_qml"`) and include context specific to that project type.
 
 ### MCP Server
 
@@ -144,17 +144,18 @@ The installer (`install.ts`) performs interactive setup:
 Scaffold a new Logos project.
 
 ```bash
-nix run github:logos-co/logos-dev-boost -- init <name> --type <module|ui-app> [--external-lib]
+nix run github:logos-co/logos-dev-boost -- init <name> --type <module|ui-qml|ui-qml-backend> [--external-lib]
 ```
 
 | Argument | Description |
 |----------|-------------|
-| `<name>` | Project name (snake_case for modules, e.g., `crypto_utils`) |
+| `<name>` | Project name (snake_case, e.g., `crypto_utils`) |
 | `--type module` | Universal C++ module (default) |
-| `--type ui-app` | IComponent + QML UI app for Basecamp |
+| `--type ui-qml` | Pure QML UI app for Basecamp (no C++) |
+| `--type ui-qml-backend` | QML + process-isolated C++ backend UI app |
 | `--external-lib` | Add external library wrapping scaffold (modules only) |
 
-Creates the directory, runs the appropriate `nix flake init -t logos-module-builder` template, adds the universal module impl layer, generates AI context files, and initializes git.
+Creates the directory, generates the appropriate template (mkLogosModule for modules, mkLogosQmlModule for UI apps), adds AI context files, and initializes git.
 
 ### `logos-dev-boost install`
 
@@ -229,7 +230,7 @@ Module authors can ship skills in their repos at `resources/boost/skills/<skill-
 logos-dev-boost wraps `logos-module-builder` for scaffolding — it does not duplicate its templates. The `init` command calls `nix flake init -t logos-module-builder` (appropriate variant) and then layers on:
 
 - Universal module impl header template (for `--type module`)
-- IComponent + QML template (for `--type ui-app`)
+- Pure QML template (for `--type ui-qml`) or QML + C++ backend template (for `--type ui-qml-backend`)
 - AI context files (AGENTS.md, CLAUDE.md, .mcp.json)
 - Test skeleton
 

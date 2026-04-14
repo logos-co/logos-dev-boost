@@ -104,5 +104,5 @@ if (!result.success()) {
 ## Accessing LogosAPI
 
 - **Universal modules:** The API is available via the generated `onInit(LogosAPI* api)` hook. Store the pointer in your impl class if needed.
-- **UI apps:** Passed to `createWidget(LogosAPI* logosAPI)`. Store it in your backend class.
+- **UI apps (with C++ backend):** Received via `initLogos(LogosAPI* api)`. Store it in your plugin class. Pure QML apps use `logos.callModule()` from QML instead.
 - **In logoscore tests:** LogosAPI is available when modules are loaded by logoscore. Not available in standalone unit tests.

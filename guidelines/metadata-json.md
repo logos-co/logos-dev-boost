@@ -38,8 +38,8 @@
 |-------|------|-------------|
 | `name` | string | Module identifier. Must match binary prefix: `my_module` -> `my_module_plugin.so` |
 | `version` | string | Semantic version (`"1.0.0"`) |
-| `type` | string | `"core"` for modules, `"ui"` for UI apps |
-| `main` | string | Plugin binary name without extension: `"my_module_plugin"` |
+| `type` | string | `"core"` for modules, `"ui_qml"` for UI apps |
+| `main` | string | Plugin binary name without extension: `"my_module_plugin"` (optional for pure QML UI apps) |
 
 ## Universal Module Fields
 
@@ -107,10 +107,18 @@ These values are passed to CMake by the `logos_module()` macro. They supplement,
 
 ```json
 {
-  "type": "ui",
+  "type": "ui_qml",
+  "view": "Main.qml",
   "icon": "icon.png",
   "category": "tools"
 }
 ```
 
-UI apps do not use `"interface": "universal"` — they are hand-written Qt plugins with `IComponent`.
+| Field | Type | Description |
+|-------|------|-------------|
+| `view` | string | **Required** for `ui_qml`. Path to QML entry point (e.g., `"Main.qml"` or `"qml/Main.qml"`) |
+| `main` | string | **Optional**. If present, indicates a C++ backend plugin (e.g., `"my_app_plugin"`). If absent, the app is pure QML |
+
+Pure QML apps have no `"main"` field — no C++ compilation occurs. QML + backend apps have both `"main"` (C++ plugin) and `"view"` (QML entry point).
+
+UI apps do not use `"interface": "universal"` — they use `mkLogosQmlModule` in their flake.nix.

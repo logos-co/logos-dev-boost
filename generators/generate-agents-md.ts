@@ -3,7 +3,7 @@ import * as path from "node:path";
 
 interface ProjectInfo {
   name: string;
-  type: "module" | "ui-app" | "unknown";
+  type: "module" | "ui-qml" | "ui-qml-backend" | "unknown";
   interface: "universal" | "legacy" | "none";
   description: string;
   dependencies: string[];
@@ -22,7 +22,13 @@ function detectProject(projectDir: string): ProjectInfo {
   if (fs.existsSync(metadataPath)) {
     const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf-8"));
     info.name = metadata.name || "unknown";
-    info.type = metadata.type === "ui" ? "ui-app" : "module";
+    if (metadata.type === "ui_qml") {
+      info.type = metadata.main ? "ui-qml-backend" : "ui-qml";
+    } else if (metadata.type === "ui") {
+      info.type = "ui-qml"; // legacy type, treat as ui-qml
+    } else {
+      info.type = "module";
+    }
     info.interface = metadata.interface === "universal" ? "universal" : "legacy";
     info.description = metadata.description || "";
     info.dependencies = metadata.dependencies || [];
@@ -63,7 +69,10 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
     lines.push("## This Project");
     lines.push("");
     lines.push(`- **Name:** ${project.name}`);
-    lines.push(`- **Type:** ${project.type === "ui-app" ? "UI App (Basecamp plugin)" : "Logos Module (core)"}`);
+    const typeLabel = project.type === "ui-qml" ? "UI App (pure QML)"
+      : project.type === "ui-qml-backend" ? "UI App (QML + C++ backend)"
+      : "Logos Module (core)";
+    lines.push(`- **Type:** ${typeLabel}`);
     if (project.interface === "universal") {
       lines.push("- **Interface:** Universal (pure C++ impl, generated Qt glue)");
     }

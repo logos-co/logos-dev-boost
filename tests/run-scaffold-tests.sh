@@ -9,8 +9,8 @@
 #   5. For modules: runs `nix build .#unit-tests -L` to verify generated tests compile and pass.
 #
 # Usage:
-#   tests/run-scaffold-tests.sh <type>          # one of: module, ui-app
-#   tests/run-scaffold-tests.sh all             # runs both supported types
+#   tests/run-scaffold-tests.sh <type>          # one of: module, ui-qml, ui-qml-backend
+#   tests/run-scaffold-tests.sh all             # runs all supported types
 #
 # Env:
 #   KEEP_TMP=1    Don't delete the scaffold tmp dir on success (for debugging).
@@ -27,10 +27,11 @@ run_one() {
   local type="$1"
   local name
   case "$type" in
-    module) name="scaffold_test_mod" ;;
-    ui-app) name="scaffold_test_ui" ;;
+    module)         name="scaffold_test_mod" ;;
+    ui-qml)         name="scaffold_test_qml" ;;
+    ui-qml-backend) name="scaffold_test_backend" ;;
     *)
-      echo "unknown type: $type (expected 'module' or 'ui-app')" >&2
+      echo "unknown type: $type (expected 'module', 'ui-qml', or 'ui-qml-backend')" >&2
       exit 2
       ;;
   esac
@@ -76,35 +77,46 @@ run_one() {
     *)      ext="so"    ;;
   esac
 
-  local plugin="$proj/result/lib/${name}_plugin.$ext"
-  if [ ! -f "$plugin" ]; then
-    echo "FAIL: expected $plugin, not found" >&2
-    echo "  result contents:" >&2
-    ls -la "$proj/result/lib/" >&2 || true
-    exit 1
-  fi
+  if [ "$type" = "ui-qml" ]; then
+    # Pure QML apps have no compiled plugin — just verify the QML entry point exists
+    local qml_entry="$proj/result/Main.qml"
+    if [ ! -f "$qml_entry" ] && [ ! -d "$proj/result" ]; then
+      echo "FAIL: expected build result at $proj/result" >&2
+      exit 1
+    fi
+    echo "  OK: pure QML app built"
+  else
+    local plugin="$proj/result/lib/${name}_plugin.$ext"
+    if [ ! -f "$plugin" ]; then
+      echo "FAIL: expected $plugin, not found" >&2
+      echo "  result contents:" >&2
+      ls -la "$proj/result/lib/" >&2 || true
+      exit 1
+    fi
 
-  echo "  OK: ${name}_plugin.$ext built"
+    echo "  OK: ${name}_plugin.$ext built"
 
-  if [ "$type" = "module" ]; then
-    echo "  running unit tests..."
-    (
-      cd "$proj"
-      nix build .#unit-tests -L
-    )
-    echo "  OK: unit tests passed"
+    if [ "$type" = "module" ]; then
+      echo "  running unit tests..."
+      (
+        cd "$proj"
+        nix build .#unit-tests -L
+      )
+      echo "  OK: unit tests passed"
+    fi
   fi
 }
 
 if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <module|ui-app|all>" >&2
+  echo "usage: $0 <module|ui-qml|ui-qml-backend|all>" >&2
   exit 2
 fi
 
 case "$1" in
   all)
     run_one module
-    run_one ui-app
+    run_one ui-qml
+    run_one ui-qml-backend
     ;;
   *)
     run_one "$1"

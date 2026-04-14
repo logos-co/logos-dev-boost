@@ -9,7 +9,7 @@ function generateLlmsTxt(boostDir: string): string {
   lines.push("> Logos is a modular application platform built with C++17, Qt 6, and Nix.");
   lines.push("> Modules are independently developed plugins that provide backend services");
   lines.push("> or graphical interfaces within the Logos ecosystem. Core modules use a");
-  lines.push("> pure C++ universal interface with generated Qt glue. UI apps use IComponent.");
+  lines.push("> pure C++ universal interface with generated Qt glue. UI apps use ui_qml.");
   lines.push("");
 
   lines.push("## Getting Started");
@@ -60,7 +60,7 @@ function getGuidelineDescription(filename: string): string {
     "metadata-json.md": "Full metadata.json schema and field reference",
     "nix-build.md": "Nix flake patterns, build commands, overrides",
     "testing.md": "Unit tests, logoscore integration, TEST_GROUPS",
-    "ui-app.md": "IComponent pattern, C++/QML boundary, design system",
+    "ui-app.md": "ui_qml apps: pure QML + QML with C++ backend (Qt Remote Objects)",
     "universal-module.md": "Pure C++ impl pattern, type mapping, codegen pipeline",
   };
   return descriptions[filename] || filename;

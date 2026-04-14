@@ -33,7 +33,8 @@ jobs:
       matrix:
         type:
           - module
-          - ui-app
+          - ui-qml
+          - ui-qml-backend
     steps:
       - uses: actions/checkout@v4
 

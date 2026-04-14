@@ -155,6 +155,63 @@ ws test my-module --auto-local    # With local dep overrides
 ws test --all --type cpp          # All C++ repos
 ```
 
+## 3. UI Integration Tests (QML Inspector)
+
+UI apps (`type: "ui_qml"`) can be tested via the QML Inspector MCP server built into `logos-standalone-app`. Tests interact with the live UI — clicking buttons, reading text, taking screenshots.
+
+### Test file pattern
+
+```javascript
+// tests/smoke.mjs
+const { resolve } = await import("node:path");
+const { test, run } = await import(
+  resolve(process.env.LOGOS_QT_MCP || "./result-mcp", "test-framework/framework.mjs")
+);
+
+test("my_app: basic interaction", async (app) => {
+  await app.expectTexts(["My App"]);
+  await app.click("Add");
+  await app.expectTexts(["Result:"]);
+});
+
+run();
+```
+
+### Test API
+
+| Method | Description |
+|--------|-------------|
+| `app.click(text, opts?)` | Find element by text and click it |
+| `app.expectTexts(texts)` | Assert all texts are visible |
+| `app.waitFor(fn, opts)` | Poll until fn succeeds (timeout, interval, description) |
+| `app.screenshot()` | Capture current state |
+| `app.findByType(type)` | Find elements by QML type |
+| `app.findByProperty(prop, value)` | Find elements by property |
+| `app.getTree()` | Get full QML element tree |
+
+### Running UI tests
+
+```bash
+# Interactive (app already running on localhost:3768)
+node tests/smoke.mjs
+
+# CI mode (launches app headless, tests, exits)
+node tests/smoke.mjs --ci ./result/bin/logos-standalone-app --verbose
+
+# Hermetic via Nix (offscreen, no display needed)
+nix build .#integration-test
+```
+
+Modules with `.mjs` test files in `tests/` automatically get `nix build .#integration-test` via `mkPluginTest`.
+
+### MCP tools for AI agents
+
+When the app is running, the `.mcp.json` auto-registers these tools with Claude Code / Cursor:
+
+`qml_screenshot`, `qml_find_and_click`, `qml_find_by_type`, `qml_find_by_property`, `qml_list_interactive`, `qml_get_tree`
+
+This lets AI agents visually verify UI changes, click through workflows, and debug layout issues in real time.
+
 ## Key Testing Rules
 
 - Unit tests use `LOGOS_TEST()` and `LOGOS_ASSERT_*` macros from `<logos_test.h>`

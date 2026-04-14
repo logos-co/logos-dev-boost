@@ -91,6 +91,44 @@ ws develop my-module               # Enter dev shell
 - Use `-L` flag to stream build logs: `nix build -L`
 - Use `--override-input` to test with local dependency changes (the `ws` CLI does this for you with `--auto-local`).
 
+## Flake Structure for UI QML Apps
+
+Pure QML (no C++ backend):
+
+```nix
+{
+  inputs.logos-module-builder.url = "github:logos-co/logos-module-builder";
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosQmlModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
+}
+```
+
+QML + C++ backend:
+
+```nix
+{
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    # Add module dependencies as inputs:
+    # some_module.url = "github:logos-co/logos-some-module";
+  };
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosQmlModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
+}
+```
+
+Both use `mkLogosQmlModule` (not `mkLogosModule`). No `preConfigure` needed — the `.rep` file (if present) is handled automatically via `REP_FILE` in CMakeLists.txt.
+
 ## Dev Shell for CMake Iteration
 
 ```bash
