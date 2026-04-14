@@ -167,17 +167,65 @@ nix build
 
 Files must be tracked by git before Nix can see them.
 
-## Step 8: Test
+## Step 8: Add Unit Tests
 
-```bash
-# Integration test via logoscore
-logoscore -m ./result/lib -l <name> -c "<name>.exampleMethod(test)"
+The scaffold creates test files using logos-test-framework. If adding tests manually:
 
-# Unit test (if tests/ directory exists)
-nix flake check -L
+```
+tests/
+├── main.cpp              # Test runner entry point
+├── test_<name>.cpp       # Test cases
+└── CMakeLists.txt        # logos_test() integration
 ```
 
-## Step 9: Inspect
+```cpp
+// tests/main.cpp
+#include <logos_test.h>
+LOGOS_TEST_MAIN()
+```
+
+```cpp
+// tests/test_<name>.cpp
+#include <logos_test.h>
+#include "../src/<name>_impl.h"
+
+LOGOS_TEST(example_method_works) {
+    <ImplClassName> impl;
+    LOGOS_ASSERT_FALSE(impl.exampleMethod("test").empty());
+}
+```
+
+```cmake
+# tests/CMakeLists.txt
+cmake_minimum_required(VERSION 3.14)
+project(<PascalName>Tests LANGUAGES CXX)
+
+include(LogosTest)
+
+logos_test(
+    NAME <name>_tests
+    MODULE_SOURCES ../src/<name>_impl.cpp
+    TEST_SOURCES
+        main.cpp
+        test_<name>.cpp
+)
+```
+
+`logos-module-builder` auto-detects `tests/CMakeLists.txt` and creates the `unit-tests` target.
+
+## Step 9: Run Tests
+
+```bash
+# Unit tests (direct impl class testing, no logoscore needed)
+nix build .#unit-tests -L
+
+# Integration test via logoscore
+logoscore -m ./result/lib -l <name> -c "<name>.exampleMethod(test)"
+```
+
+For mocking other modules or C libraries in tests, see the `testing-modules` skill.
+
+## Step 10: Inspect
 
 ```bash
 lm ./result/lib/<name>_plugin.so
@@ -191,6 +239,8 @@ lm methods ./result/lib/<name>_plugin.so --json
 - [ ] Impl class name matches `--impl-class` in flake.nix preConfigure
 - [ ] `CMakeLists.txt` lists generated_code files in SOURCES
 - [ ] `flake.nix` has preConfigure with logos-cpp-generator
+- [ ] `tests/CMakeLists.txt` uses `include(LogosTest)` + `logos_test()`
 - [ ] All files tracked by git (`git add -A`)
 - [ ] `nix build` succeeds
+- [ ] `nix build .#unit-tests -L` succeeds
 - [ ] `logoscore` can load and call the module

@@ -124,7 +124,9 @@ crypto_utils/
 ├── CMakeLists.txt                # logos_module() with generated_code sources
 ├── flake.nix                     # preConfigure runs logos-cpp-generator --from-header
 ├── tests/
-│   └── test_crypto_utils.cpp     # Unit tests against impl class directly
+│   ├── main.cpp                  # LOGOS_TEST_MAIN() entry point
+│   ├── test_crypto_utils.cpp     # Unit tests using LOGOS_TEST() and assertions
+│   └── CMakeLists.txt            # logos_test() macro (auto-detected by builder)
 ├── CLAUDE.md                     # Generated: knows this is a universal module
 ├── AGENTS.md                     # Universal context for any AI tool
 └── .mcp.json                     # MCP server registration
@@ -178,10 +180,10 @@ logoscore -m ./result/lib -l crypto_utils \
 **Step 5: Unit test (no logoscore needed)**
 
 ```bash
-nix flake check -L
+nix build .#unit-tests -L
 ```
 
-Unit tests instantiate `CryptoUtilsImpl` directly — it is a plain C++ class with no framework dependencies.
+Unit tests use logos-test-framework (`LOGOS_TEST()` macros, `LOGOS_ASSERT_*`) and instantiate `CryptoUtilsImpl` directly — it is a plain C++ class with no framework dependencies. `logos-module-builder` auto-detects `tests/CMakeLists.txt` and creates the `unit-tests` target.
 
 **Step 6: Inter-module communication**
 
@@ -208,7 +210,7 @@ lgx verify crypto_utils.lgx
 - Step 1: `init` command scaffolds from universal module template; generated CLAUDE.md/AGENTS.md teach agents the universal pattern
 - Step 2: Guidelines ensure pure C++, no Qt types; the type mapping table is always available
 - Step 3: Build help explains the codegen pipeline; troubleshooting for common generator errors
-- Steps 4-5: Testing skill covers logoscore integration tests and direct unit tests
+- Steps 4-5: Testing skill covers logos-test-framework unit tests (LOGOS_TEST, LogosTestContext, mocking) and logoscore integration tests
 - Step 6: Inter-module comm skill explains LogosAPI patterns and dependency declaration
 - Step 7: Packaging skill covers the full LGX workflow
 
@@ -392,7 +394,7 @@ What happens when a developer tells an AI agent "create a module that provides e
 
 5. Agent builds with `nix build` — build-help guidelines explain the pipeline. If errors occur, agent knows common fixes: generator type mapping issues, missing `find_package`, `metadata.json`/header class name mismatch.
 
-6. Agent tests with `logoscore` — testing skill provides exact commands and expected output patterns.
+6. Agent runs unit tests with `nix build .#unit-tests -L` — the scaffolded `tests/` directory uses logos-test-framework (`LOGOS_TEST()`, `LOGOS_ASSERT_*`). Tests are auto-detected by `logos-module-builder`. Agent also tests with `logoscore` for integration testing — testing skill provides exact commands and expected output patterns.
 
 **Without logos-dev-boost:** Agent would write `Q_INVOKABLE` methods, use `QString` everywhere, try `cmake --build` instead of `nix build`, hallucinate a `LogosPlugin` base class that doesn't exist, and have no idea about the code generator pipeline.
 

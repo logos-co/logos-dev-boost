@@ -94,9 +94,12 @@ export function handleScaffold(args: Record<string, unknown>) {
               `cd ${path.basename(projectDir)}`,
               "git init && git add -A",
               "nix build",
-              type === "module"
-                ? `logoscore -m ./result/lib -l ${name} -c "${name}.methodName(args)"`
-                : "cp -r result/* ~/.local/share/Logos/LogosBasecampDev/plugins/" + name + "/",
+              ...(type === "module"
+                ? [
+                    "nix build .#unit-tests -L",
+                    `logoscore -m ./result/lib -l ${name} -c "${name}.methodName(args)"`,
+                  ]
+                : ["cp -r result/* ~/.local/share/Logos/LogosBasecampDev/plugins/" + name + "/"]),
             ],
           },
           null,
@@ -245,19 +248,46 @@ logos_module(
   );
 
   writeFile(
+    path.join(dir, "tests/main.cpp"),
+    `#include <logos_test.h>
+
+LOGOS_TEST_MAIN()
+`,
+    filesCreated
+  );
+
+  writeFile(
     path.join(dir, `tests/test_${name}.cpp`),
-    `#include "../src/${name}_impl.h"
-#include <cassert>
-#include <iostream>
+    `#include <logos_test.h>
+#include "../src/${name}_impl.h"
 
-int main() {
+LOGOS_TEST(echo_returns_prefixed_input) {
     ${pascal}Impl impl;
-
-    assert(impl.echo("test") == "echo: test");
-
-    std::cout << "All tests passed" << std::endl;
-    return 0;
+    LOGOS_ASSERT_EQ(impl.echo("hello"), std::string("echo: hello"));
 }
+
+LOGOS_TEST(echo_handles_empty_input) {
+    ${pascal}Impl impl;
+    LOGOS_ASSERT_EQ(impl.echo(""), std::string("echo: "));
+}
+`,
+    filesCreated
+  );
+
+  writeFile(
+    path.join(dir, "tests/CMakeLists.txt"),
+    `cmake_minimum_required(VERSION 3.14)
+project(${pascal}Tests LANGUAGES CXX)
+
+include(LogosTest)
+
+logos_test(
+    NAME ${name}_tests
+    MODULE_SOURCES ../src/${name}_impl.cpp
+    TEST_SOURCES
+        main.cpp
+        test_${name}.cpp
+)
 `,
     filesCreated
   );

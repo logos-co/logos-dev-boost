@@ -116,13 +116,24 @@ function buildHelp(project: { isUniversal: boolean; name: string; hasFlake: bool
 
 function testHelp(project: { isUniversal: boolean; name: string }): string {
   const lines = ["## Test Commands\n"];
+  const pascal = project.name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
 
   if (project.isUniversal) {
-    lines.push("### Unit Tests (direct impl class testing)\n");
+    lines.push("### Unit Tests (logos-test-framework)\n");
     lines.push("```bash");
-    lines.push("nix flake check -L    # Run Nix-defined checks");
+    lines.push("nix build .#unit-tests -L    # Build and run unit tests");
+    lines.push("nix flake check -L           # Run all Nix checks including tests");
     lines.push("```\n");
-    lines.push("Unit tests instantiate `" + project.name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("") + "Impl` directly — no logoscore needed.\n");
+    lines.push(`Unit tests instantiate \`${pascal}Impl\` directly — no logoscore needed.\n`);
+    lines.push("Tests use `LOGOS_TEST()` macros and `LogosTestContext` for mocking.");
+    lines.push("Test files live in `tests/` with `CMakeLists.txt` using `logos_test()`.");
+    lines.push("`logos-module-builder` auto-detects `tests/CMakeLists.txt` and creates the `unit-tests` target.\n");
+    lines.push("### Test Runner CLI\n");
+    lines.push("```bash");
+    lines.push(`./${project.name}_tests --filter <pattern>   # Run matching tests only`);
+    lines.push(`./${project.name}_tests --json               # JSON output for CI/agents`);
+    lines.push(`./${project.name}_tests --no-color           # Disable colored output`);
+    lines.push("```\n");
   }
 
   lines.push("### Integration Tests with logoscore\n");
@@ -219,6 +230,10 @@ function troubleshoot(error: string, project: { isUniversal: boolean; name: stri
     lines.push("**Fix:** Store references in the output mean it's a dev build, not portable. Use `nix build .#portable` for distribution.");
   } else if (errorLower.includes("git") || errorLower.includes("not a git")) {
     lines.push("**Fix:** Nix flakes require git tracking. Run `git add -A` before `nix build`.");
+  } else if (errorLower.includes("logostest") || errorLower.includes("logos_test") || errorLower.includes("logos_test.h")) {
+    lines.push("**Fix:** Test framework not found. Ensure `tests/CMakeLists.txt` uses `include(LogosTest)` and that `logos-module-builder` is your flake input (it provides the test framework automatically).");
+  } else if (errorLower.includes("unit-tests") || errorLower.includes("unit_tests")) {
+    lines.push("**Fix:** The `unit-tests` target requires `tests/CMakeLists.txt` in your project root. Create it with `include(LogosTest)` and `logos_test()`. The builder auto-detects it.");
   } else {
     lines.push("**General tips:**");
     lines.push("- Build with `-L` for full logs: `nix build -L`");
@@ -247,6 +262,8 @@ function commonIssues(project: { isUniversal: boolean }): string {
     lines.push("6. **Generated files not found** — Check `preConfigure` runs logos-cpp-generator");
     lines.push("7. **Unknown type mapped to any** — Use types from the supported mapping table");
     lines.push("8. **Impl class not found** — `--impl-class` must exactly match the class name");
+    lines.push("9. **unit-tests not found** — Add `tests/CMakeLists.txt` with `include(LogosTest)` + `logos_test()`");
+    lines.push("10. **LogosTest.cmake not found** — Ensure you build via `nix build .#unit-tests`, not raw cmake");
   }
 
   return lines.join("\n");
