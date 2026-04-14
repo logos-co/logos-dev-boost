@@ -6,6 +6,7 @@
 #   2. `git init`s the scaffolded project (flakes only see tracked files).
 #   3. Runs `nix build` on the scaffolded project.
 #   4. Asserts the expected plugin binary exists under ./result/lib/.
+#   5. For modules: runs `nix build .#unit-tests -L` to verify generated tests compile and pass.
 #
 # Usage:
 #   tests/run-scaffold-tests.sh <type>          # one of: module, ui-app
@@ -84,6 +85,15 @@ run_one() {
   fi
 
   echo "  OK: ${name}_plugin.$ext built"
+
+  if [ "$type" = "module" ]; then
+    echo "  running unit tests..."
+    (
+      cd "$proj"
+      nix build .#unit-tests -L
+    )
+    echo "  OK: unit tests passed"
+  fi
 }
 
 if [ "$#" -ne 1 ]; then
