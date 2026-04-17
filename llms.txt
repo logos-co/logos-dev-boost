@@ -3,7 +3,7 @@
 > Logos is a modular application platform built with C++17, Qt 6, and Nix.
 > Modules are independently developed plugins that provide backend services
 > or graphical interfaces within the Logos ecosystem. Core modules use a
-> pure C++ universal interface with generated Qt glue. UI apps use IComponent.
+> pure C++ universal interface with generated Qt glue. UI apps use ui_qml.
 
 ## Getting Started
 - [Module Development Guide](docs/spec.md): How to create Logos modules and UI apps
@@ -15,17 +15,17 @@
 - [metadata json](guidelines/metadata-json.md): Full metadata.json schema and field reference
 - [nix build](guidelines/nix-build.md): Nix flake patterns, build commands, overrides
 - [testing](guidelines/testing.md): Unit tests, logoscore integration, TEST_GROUPS
-- [ui app](guidelines/ui-app.md): IComponent pattern, C++/QML boundary, design system
+- [ui app](guidelines/ui-app.md): ui_qml apps: pure QML + QML with C++ backend (Qt Remote Objects)
 - [universal module](guidelines/universal-module.md): Pure C++ impl pattern, type mapping, codegen pipeline
 
 ## Skills
 - [add-to-workspace](skills/add-to-workspace/SKILL.md): Activate when registering a new module in the logos-workspace. Covers adding git submodules, flake.nix inputs with follows declarations, scripts/ws REPOS array, repo groups, and dep-graph.nix regeneration.
-- [create-ui-app](skills/create-ui-app/SKILL.md): Activate when creating a Logos Basecamp UI app with IComponent, C++ backend, and QML frontend. Covers the plugin class, QObject backend, QML entry point, and the C++/QML boundary.
+- [create-ui-app](skills/create-ui-app/SKILL.md): Activate when creating a Logos Basecamp UI app. Covers two subtypes — pure QML (no C++) and QML + process-isolated C++ backend with Qt Remote Objects.
 - [create-universal-module](skills/create-universal-module/SKILL.md): Activate when creating a new Logos module with the universal C++ interface. Covers scaffolding, metadata.json, flake.nix with code generator, CMakeLists.txt, and the pure C++ impl header.
 - [inter-module-comm](skills/inter-module-comm/SKILL.md): Activate when implementing inter-module communication in Logos. Covers LogosAPI::callModule(), LogosResult handling, dependency declaration in metadata.json, generated client stubs, and the QML bridge.
 - [nix-flake-setup](skills/nix-flake-setup/SKILL.md): Activate when configuring Nix flake.nix for a Logos module. Covers flake inputs, follows declarations, preConfigure for code generation, mkLogosModule, overrides for local development, and workspace integration.
 - [package-lgx](skills/package-lgx/SKILL.md): Activate when packaging a Logos module or UI app for distribution as an LGX package. Covers lgx create, adding platform variants, verification, portable builds, and installation via lgpm.
-- [testing-modules](skills/testing-modules/SKILL.md): Activate when writing tests for Logos modules. Covers unit testing universal modules (direct impl class testing), logoscore integration tests, TEST_GROUPS, mock transport, and Nix check configuration.
+- [testing-modules](skills/testing-modules/SKILL.md): Activate when writing tests for Logos modules. Covers the logos-test-framework (LOGOS_TEST macros, LogosTestContext, module mocking, C library mocking, event testing), logos_test() CMake integration, logoscore integration tests, and Nix check configuration.
 - [wrap-external-lib](skills/wrap-external-lib/SKILL.md): Activate when wrapping an external C or C++ library as a Logos universal module. Covers external_libraries in metadata.json, flake input configuration, extern C includes, and the Go library special case.
 
 ## Optional

@@ -3,13 +3,13 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const apiReferenceTool: Tool = {
   name: "logos_api_reference",
   description:
-    "Returns API documentation for Logos interfaces: LogosAPI, LogosResult, LogosProviderBase, PluginInterface, IComponent, metadata.json schema, or the universal type mapping table.",
+    "Returns API documentation for Logos interfaces: LogosAPI, LogosResult, LogosProviderBase, PluginInterface, UI App plugin pattern, metadata.json schema, or the universal type mapping table.",
   inputSchema: {
     type: "object" as const,
     properties: {
       interface: {
         type: "string",
-        description: "Which interface to look up: 'LogosAPI', 'LogosResult', 'LogosProviderBase', 'PluginInterface', 'IComponent', 'metadata', 'types', or 'all'",
+        description: "Which interface to look up: 'LogosAPI', 'LogosResult', 'LogosProviderBase', 'PluginInterface', 'IComponent' (UI app plugin pattern), 'metadata', 'types', or 'all'",
       },
     },
     required: ["interface"],
@@ -38,7 +38,7 @@ Store the pointer if needed for later use.
 
 ## Usage in UI Apps
 
-Passed to \`createWidget(LogosAPI* logosAPI)\`. Store it in your backend class.
+UI apps with C++ backends receive it via \`initLogos(LogosAPI* api)\`. Store it in your plugin class.
 
 ## QML Bridge
 
@@ -131,34 +131,48 @@ public:
 Universal modules: the generated Plugin class implements PluginInterface automatically.
 Legacy modules: your plugin class inherits both QObject and PluginInterface.`,
 
-  IComponent: `# IComponent
+  IComponent: `# UI App Plugin Pattern (ui_qml with C++ backend)
 
-Interface for UI Apps loaded by Logos Basecamp. NOT used by core modules.
+UI Apps with C++ backends use Qt Remote Objects for process-isolated IPC.
 
-\`\`\`cpp
-class IComponent {
-public:
-    virtual ~IComponent() = default;
-    virtual QWidget* createWidget(LogosAPI* logosAPI = nullptr) = 0;
-    virtual void destroyWidget(QWidget* widget) = 0;
-};
+## .rep File (Interface Definition)
+
+\`\`\`
+class MyApp
+{
+    PROP(QString status READWRITE)
+    SLOT(int doSomething(int a, int b))
+}
 \`\`\`
 
 ## Plugin Class Pattern
 
 \`\`\`cpp
-class MyPlugin : public QObject, public IComponent {
+class MyAppPlugin : public MyAppSimpleSource,
+                    public MyAppInterface,
+                    public MyAppViewPluginBase
+{
     Q_OBJECT
-    Q_INTERFACES(IComponent)
-    Q_PLUGIN_METADATA(IID IComponent_iid FILE "metadata.json")
+    Q_PLUGIN_METADATA(IID MyAppInterface_iid FILE "metadata.json")
+    Q_INTERFACES(MyAppInterface)
 public:
-    QWidget* createWidget(LogosAPI* logosAPI = nullptr) override;
-    void destroyWidget(QWidget* widget) override;
+    Q_INVOKABLE void initLogos(LogosAPI* api);
+    int doSomething(int a, int b) override;
 };
 \`\`\`
 
-createWidget() is called once when the plugin is loaded. It should return a QWidget
-(typically QQuickWidget for QML-based apps). destroyWidget() is called on unload.`,
+Three parent classes:
+- MyAppSimpleSource: generated from .rep, property storage + slot declarations
+- MyAppInterface: extends PluginInterface for Qt plugin loading
+- MyAppViewPluginBase: provides setBackend() for Qt Remote Objects wiring
+
+initLogos() is called when the plugin loads. Call setBackend(this) to wire up QTRO.
+
+## QML Frontend APIs
+
+- logos.module("name") — typed Qt Remote Objects replica
+- logos.isViewModuleReady("name") — backend connection status
+- logos.watch(pendingReply, onSuccess, onError) — async slot calls`,
 
   metadata: `# metadata.json Schema
 

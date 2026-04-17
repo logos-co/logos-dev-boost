@@ -49,13 +49,14 @@ The AI tool automatically picks up `CLAUDE.md`/`AGENTS.md` (always-loaded contex
 ### `init` — Scaffold a new project
 
 ```bash
-logos-dev-boost init <name> --type <module|ui-app> [--external-lib]
+logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend> [--external-lib]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--type module` | **Universal C++ module** (default). Pure C++ with `std::string`, `int64_t`, `std::vector<T>`. The build system generates all Qt glue via `logos-cpp-generator --from-header`. No Qt in your code. |
-| `--type ui-app` | **Basecamp UI app**. C++ backend (`IComponent` + `QObject`) with QML frontend. Provides a graphical interface in the Basecamp MDI workspace. |
+| `--type ui-qml` | **Pure QML UI app**. QML-only Basecamp UI app with no C++ compilation. Calls backend modules via `logos.callModule()` bridge. |
+| `--type ui-qml-backend` | **QML + C++ backend UI app**. Process-isolated C++ backend (Qt Remote Objects) with QML frontend. Backend runs in `logos_host`, QML gets a typed replica via `logos.module()`. |
 | `--external-lib` | Include scaffold for wrapping an external C/C++ library (modules only). Adds Nix packaging for the external dependency and FFI bridge code. |
 
 Examples:
@@ -67,8 +68,11 @@ nix run github:logos-co/logos-dev-boost -- init crypto_utils --type module
 # Module wrapping an external C library (e.g., libsodium, sqlite)
 nix run github:logos-co/logos-dev-boost -- init crypto_utils --type module --external-lib
 
-# UI app with C++ backend + QML frontend
-nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-app
+# Pure QML UI app (no C++)
+nix run github:logos-co/logos-dev-boost -- init notes_ui --type ui-qml
+
+# QML + C++ backend UI app
+nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-qml-backend
 ```
 
 ### `install` — Configure AI tools for an existing project
@@ -128,7 +132,7 @@ Skills are task-specific knowledge modules that activate when the AI works on a 
 
 **Logos Modules** — Pure C++ "universal interface" modules. You write a plain C++ class with `std::string`, `int64_t`, `std::vector<T>`. The build system generates all Qt glue automatically via `logos-cpp-generator --from-header`. No Qt types in your code. This is the recommended approach for most functionality.
 
-**UI Apps** — Qt plugins loaded by Logos Basecamp. C++ backend (`IComponent` + `QObject`) with QML frontend. Use this when you need a graphical interface in the Basecamp desktop app.
+**UI Apps** — QML-based UI apps displayed in the Basecamp workspace. Two subtypes: pure QML (no C++, calls modules via `logos.callModule()`) or QML + C++ backend (process-isolated via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
 ## Documentation
 

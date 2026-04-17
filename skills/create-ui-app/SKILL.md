@@ -2,7 +2,7 @@
 
 ## name: create-ui-app
 
-description: Activate when creating a Logos Basecamp UI app with IComponent, C++backend, and QML frontend. Covers the plugin class, QObject backend, QML entry point, and the C++/QML boundary.
+description: Activate when creating a Logos Basecamp UI app. Covers two subtypes — pure QML (no C++) and QML + process-isolated C++ backend with Qt Remote Objects.
 
 # Create a UI App for Logos Basecamp
 
@@ -11,94 +11,392 @@ description: Activate when creating a Logos Basecamp UI app with IComponent, C++
 Use this skill when:
 
 - Creating an application with a graphical interface for Basecamp
-- Building an `IComponent` plugin with `createWidget` / `destroyWidget`
-- The app has a C++ backend and QML frontend
+- Building a pure QML app that calls backend modules via `logos.callModule()`
+- Building a QML app with a process-isolated C++ backend via Qt Remote Objects
 
-## Fastest path: scaffold with logos-dev-boost
+## Choose Your Subtype
 
-```bash
-nix run github:logos-co/logos-dev-boost -- init my_app --type ui-app
-cd logos-my-app
-git init && git add -A
-nix build
-nix run .          # standalone app (same as nix run .#app)
-```
-
-This generates the full structure below, compiles cleanly, and runs standalone via `nix run`.
+| Need | Type | Scaffold command |
+|------|------|-----------------|
+| QML-only UI, calls existing modules | Pure QML | `--type ui-qml` |
+| Custom business logic + QML UI | QML + Backend | `--type ui-qml-backend` |
 
 ---
 
-## Step 1: Project Structure
+## Path A: Pure QML App
+
+### Fastest path: scaffold
+
+```bash
+nix run github:logos-co/logos-dev-boost -- init my_app --type ui-qml
+cd logos-my-app
+git init && git add -A
+nix build
+nix run .
+```
+
+### Project Structure
 
 ```
 logos-my-app/
-├── interfaces/
-│   └── IComponent.h        ← vendored locally (every UI repo does this)
-├── src/
-│   ├── my_app_plugin.h
-│   ├── my_app_plugin.cpp
-│   ├── MyAppBackend.h
-│   ├── MyAppBackend.cpp
-│   └── qml/
-│       └── Main.qml        ← QML entry point (embedded via qt_add_resources)
-├── metadata.json
-├── CMakeLists.txt
-├── flake.nix
+├── Main.qml              ← QML entry point
+├── metadata.json          ← "type": "ui_qml", "view": "Main.qml"
+├── flake.nix              ← uses mkLogosQmlModule
 └── .gitignore
 ```
 
-`interfaces/IComponent.h` must be present — it is **not** provided by the SDK, every UI repo vendors it locally.
+No C++ files, no CMakeLists.txt, no compilation.
 
-## Step 2: `interfaces/IComponent.h`
-
-```cpp
-#pragma once
-
-#include <QObject>
-#include <QWidget>
-#include <QtPlugin>
-
-class LogosAPI;
-
-class IComponent {
-public:
-    virtual ~IComponent() = default;
-    virtual QWidget* createWidget(LogosAPI* logosAPI = nullptr) = 0;
-    virtual void destroyWidget(QWidget* widget) = 0;
-};
-
-#define IComponent_iid "com.logos.component.IComponent"
-Q_DECLARE_INTERFACE(IComponent, IComponent_iid)
-```
-
-## Step 3: `metadata.json`
+### `metadata.json`
 
 ```json
 {
   "name": "my_app",
   "version": "1.0.0",
-  "description": "My Basecamp UI application",
-  "type": "ui",
+  "description": "My QML UI application",
+  "type": "ui_qml",
+  "view": "Main.qml",
   "category": "tools",
-  "main": "my_app_plugin",
-  "dependencies": [],
-  "nix": {
-    "packages": { "build": [], "runtime": ["qt6.qtdeclarative"] },
-    "external_libraries": [],
-    "cmake": { "find_packages": [], "extra_sources": [] }
-  }
+  "dependencies": ["some_backend_module"]
 }
 ```
 
-Note: UI apps do NOT use `"interface": "universal"`. They are hand-written Qt plugins.
+Note: No `"main"` field — this signals a pure QML app.
 
-## Step 4: `CMakeLists.txt`
+### `Main.qml`
+
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+Item {
+    id: root
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 24
+        spacing: 16
+
+        Text {
+            text: "My App"
+            font.pixelSize: 24
+            color: "#ffffff"
+        }
+
+        Button {
+            text: "Call Backend"
+            onClicked: {
+                // logos bridge is injected by the host
+                var result = logos.callModule("some_backend_module", "myMethod", ["arg"])
+                console.log("Result:", result)
+            }
+        }
+    }
+}
+```
+
+### `flake.nix`
+
+If the app depends on backend modules (listed in `metadata.json` `"dependencies"`), add them as flake inputs. The input attribute name must match the dependency name in `metadata.json`.
+
+```nix
+{
+  description = "My QML UI App";
+
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+
+    # Add each dependency from metadata.json as a flake input.
+    # The attribute name must match the dependency name.
+    # Use path: for local development, github: for CI/published modules:
+    some_backend_module.url = "path:../logos-some-backend-module";
+    # some_backend_module.url = "github:logos-co/logos-some-backend-module";
+  };
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosQmlModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
+}
+```
+
+### Resolving Module Dependencies
+
+Each backend module dependency must be **built** with its shared library (`.so` on Linux, `.dylib` on macOS) present in its `lib/` directory. If the library is missing, the nix build fails with linker errors.
+
+Three ways to point at a dependency:
+
+| Approach | `flake.nix` input URL | Build command |
+|----------|----------------------|---------------|
+| Local path in flake.nix | `path:../logos-my-module` | `nix run .` |
+| Remote URL + local override | `github:org/repo` | `nix run . --override-input some_backend_module path:../logos-my-module` |
+| Fully remote | `github:org/repo` | `nix run .` |
+
+`--override-input` is useful for quick iteration — it overrides the flake input at build time without editing `flake.nix`. Use `path:` in `flake.nix` when you persistently develop against a local checkout.
+
+### Build and Test
+
+```bash
+git init && git add -A
+nix build
+nix run .          # standalone app with QML Inspector on localhost:3768
+
+# Or with a local module override:
+nix run . --override-input some_backend_module path:../logos-some-backend-module
+```
+
+### Integration Testing (Optional)
+
+Create `tests/smoke.mjs`:
+
+```javascript
+const { resolve } = await import("node:path");
+const { test, run } = await import(
+  resolve(process.env.LOGOS_QT_MCP || "./result-mcp", "test-framework/framework.mjs")
+);
+
+test("my_app: verify UI loads", async (app) => {
+  await app.expectTexts(["Call Backend"]);
+  await app.click("Call Backend");
+});
+
+run();
+```
+
+Run: `nix build .#integration-test` (headless) or `node tests/smoke.mjs` (interactive, app must be running).
+
+---
+
+## Path B: QML + C++ Backend App
+
+### Fastest path: scaffold
+
+```bash
+nix run github:logos-co/logos-dev-boost -- init my_app --type ui-qml-backend
+cd logos-my-app
+git init && git add -A
+nix build
+nix run .
+```
+
+### Project Structure
+
+```
+logos-my-app/
+├── src/
+│   ├── my_app_interface.h     ← extends PluginInterface
+│   ├── my_app.rep             ← Qt Remote Objects interface definition
+│   ├── my_app_plugin.h        ← inherits SimpleSource + Interface + ViewPluginBase
+│   ├── my_app_plugin.cpp      ← implementation
+│   └── qml/
+│       └── Main.qml           ← QML frontend (uses logos.module() replica)
+├── metadata.json              ← "type": "ui_qml", "main": "my_app_plugin"
+├── CMakeLists.txt             ← logos_module() with REP_FILE
+├── flake.nix                  ← uses mkLogosQmlModule
+└── .gitignore
+```
+
+### Step 1: `metadata.json`
+
+```json
+{
+  "name": "my_app",
+  "version": "1.0.0",
+  "description": "My UI app with C++ backend",
+  "type": "ui_qml",
+  "main": "my_app_plugin",
+  "view": "qml/Main.qml",
+  "category": "tools",
+  "dependencies": []
+}
+```
+
+The `"main"` field signals a C++ backend is present.
+
+### Step 2: `.rep` File (Qt Remote Objects Interface)
+
+`src/my_app.rep`:
+
+```
+class MyApp
+{
+    PROP(QString status READWRITE)
+    SLOT(int add(int a, int b))
+}
+```
+
+Defines properties (auto-synced to QML) and callable slots.
+
+### Step 3: Interface Header
+
+`src/my_app_interface.h`:
+
+```cpp
+#ifndef MY_APP_INTERFACE_H
+#define MY_APP_INTERFACE_H
+
+#include <QObject>
+#include <QString>
+#include "interface.h"
+
+class MyAppInterface : public PluginInterface
+{
+public:
+    virtual ~MyAppInterface() = default;
+};
+
+#define MyAppInterface_iid "org.logos.MyAppInterface"
+Q_DECLARE_INTERFACE(MyAppInterface, MyAppInterface_iid)
+
+#endif
+```
+
+### Step 4: Plugin Class
+
+`src/my_app_plugin.h`:
+
+```cpp
+#ifndef MY_APP_PLUGIN_H
+#define MY_APP_PLUGIN_H
+
+#include <QString>
+#include <QVariantList>
+#include "my_app_interface.h"
+#include "LogosViewPluginBase.h"
+#include "rep_my_app_source.h"
+
+class LogosAPI;
+
+class MyAppPlugin : public MyAppSimpleSource,
+                    public MyAppInterface,
+                    public MyAppViewPluginBase
+{
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID MyAppInterface_iid FILE "metadata.json")
+    Q_INTERFACES(MyAppInterface)
+
+public:
+    explicit MyAppPlugin(QObject* parent = nullptr);
+    ~MyAppPlugin() override;
+
+    QString name()    const override { return "my_app"; }
+    QString version() const override { return "1.0.0"; }
+
+    Q_INVOKABLE void initLogos(LogosAPI* api);
+
+    // Slots from my_app.rep
+    int add(int a, int b) override;
+
+signals:
+    void eventResponse(const QString& eventName, const QVariantList& args);
+
+private:
+    LogosAPI* m_logosAPI = nullptr;
+};
+
+#endif
+```
+
+Three parent classes:
+- `MyAppSimpleSource` — generated from `.rep`, property storage + slot declarations
+- `MyAppInterface` — extends `PluginInterface` for Qt plugin loading
+- `MyAppViewPluginBase` — provides `setBackend()` for Qt Remote Objects wiring
+
+`src/my_app_plugin.cpp`:
+
+```cpp
+#include "my_app_plugin.h"
+#include "logos_api.h"
+#include <QDebug>
+
+MyAppPlugin::MyAppPlugin(QObject* parent)
+    : MyAppSimpleSource(parent)
+{
+    setStatus("Ready");
+}
+
+MyAppPlugin::~MyAppPlugin() = default;
+
+void MyAppPlugin::initLogos(LogosAPI* api)
+{
+    m_logosAPI = api;
+    setBackend(this);    // wires up Qt Remote Objects source
+    qDebug() << "MyAppPlugin: initialized";
+}
+
+int MyAppPlugin::add(int a, int b)
+{
+    int result = a + b;
+    setStatus(QStringLiteral("%1 + %2 = %3").arg(a).arg(b).arg(result));
+    return result;
+}
+```
+
+### Step 5: QML Frontend
+
+`src/qml/Main.qml`:
+
+```qml
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Item {
+    id: root
+
+    readonly property var backend: logos.module("my_app")
+    readonly property bool ready: backend !== null && logos.isViewModuleReady("my_app")
+    readonly property string status: backend ? backend.status : ""
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 24
+        spacing: 16
+
+        Text {
+            text: root.ready ? "Connected" : "Connecting to backend..."
+            color: root.ready ? "#56d364" : "#f0883e"
+            font.pixelSize: 12
+        }
+
+        Button {
+            text: "Add"
+            enabled: root.ready
+            onClicked: {
+                logos.watch(backend.add(1, 2),
+                    function(value) { resultText.text = "Result: " + value },
+                    function(error) { resultText.text = "Error: " + error }
+                )
+            }
+        }
+
+        Text {
+            id: resultText
+            text: "Press Add to call the backend"
+            color: "#56d364"
+        }
+
+        Text {
+            text: "Backend status: " + root.status
+            color: "#8b949e"
+        }
+    }
+}
+```
+
+Key QML APIs:
+- `logos.module("name")` — typed Qt Remote Objects replica
+- `logos.isViewModuleReady("name")` — backend connection status
+- `logos.watch(pendingReply, onSuccess, onError)` — async slot call handling
+
+### Step 6: `CMakeLists.txt`
 
 ```cmake
 cmake_minimum_required(VERSION 3.14)
 project(MyAppPlugin LANGUAGES CXX)
-
-set(CMAKE_AUTOMOC ON)
 
 if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
     include($ENV{LOGOS_MODULE_BUILDER_ROOT}/cmake/LogosModule.cmake)
@@ -108,238 +406,79 @@ endif()
 
 logos_module(
     NAME my_app
+    REP_FILE src/my_app.rep
     SOURCES
+        src/my_app_interface.h
         src/my_app_plugin.h
         src/my_app_plugin.cpp
-        src/MyAppBackend.h
-        src/MyAppBackend.cpp
-    INCLUDE_DIRS
-        ${CMAKE_CURRENT_SOURCE_DIR}/interfaces   # so #include <IComponent.h> resolves
-)
-
-find_package(Qt6 REQUIRED COMPONENTS Widgets Quick QuickWidgets QuickControls2)
-
-qt_add_resources(my_app_module_plugin ui_qml_resources
-    PREFIX "/"
-    FILES
-        src/qml/Main.qml
-)
-
-target_link_libraries(my_app_module_plugin PRIVATE
-    Qt6::Widgets
-    Qt6::Quick
-    Qt6::QuickWidgets
-    Qt6::QuickControls2
 )
 ```
 
-Key points:
+`REP_FILE` tells the build system to generate Qt Remote Objects source/replica headers.
 
-- `CMAKE_AUTOMOC ON` (not AUTORCC — resources go through `qt_add_resources`)
-- `INCLUDE_DIRS` points at `interfaces/` so `<IComponent.h>` resolves
-- `qt_add_resources` embeds QML at `qrc:/src/qml/Main.qml`
+### Step 7: `flake.nix`
 
-## Step 5: Plugin Class
+If the app depends on other modules (listed in `metadata.json` `"dependencies"`), add them as flake inputs. The input attribute name must match the dependency name.
 
-`src/my_app_plugin.h`:
+```nix
+{
+  description = "My UI App with C++ Backend";
 
-```cpp
-#pragma once
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
 
-#include <IComponent.h>
-#include <QObject>
+    # Add dependencies here if metadata.json lists any.
+    # Use path: for local, github: for remote:
+    # some_module.url = "path:../logos-some-module";
+    # some_module.url = "github:logos-co/logos-some-module";
+  };
 
-class LogosAPI;
-
-class MyAppPlugin : public QObject, public IComponent {
-    Q_OBJECT
-    Q_INTERFACES(IComponent)
-    Q_PLUGIN_METADATA(IID IComponent_iid FILE "../metadata.json")
-
-public:
-    explicit MyAppPlugin(QObject* parent = nullptr);
-    ~MyAppPlugin();
-
-    Q_INVOKABLE QWidget* createWidget(LogosAPI* logosAPI = nullptr) override;
-    void destroyWidget(QWidget* widget) override;
-};
-```
-
-`src/my_app_plugin.cpp`:
-
-```cpp
-#include "my_app_plugin.h"
-#include "MyAppBackend.h"
-#include <QDebug>
-#include <QDir>
-#include <QString>
-#include <QQuickWidget>
-#include <QQmlContext>
-#include <QQuickStyle>
-#include <QUrl>
-
-MyAppPlugin::MyAppPlugin(QObject* parent) : QObject(parent) {}
-MyAppPlugin::~MyAppPlugin() {}
-
-QWidget* MyAppPlugin::createWidget(LogosAPI* logosAPI) {
-    QQuickStyle::setStyle("Basic");
-
-    auto* quickWidget = new QQuickWidget();
-    quickWidget->setMinimumSize(800, 600);
-    quickWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-
-    auto* backend = new MyAppBackend(logosAPI, quickWidget);
-    quickWidget->rootContext()->setContextProperty("backend", backend);
-
-    // Dev mode: export QML_PATH=$PWD/src/qml to load from disk without rebuilding
-    const QString devSource = QString::fromUtf8(qgetenv("QML_PATH"));
-    const QUrl qmlUrl = devSource.isEmpty()
-        ? QUrl("qrc:/src/qml/Main.qml")
-        : QUrl::fromLocalFile(QDir(devSource).filePath("Main.qml"));
-
-    quickWidget->setSource(qmlUrl);
-
-    if (quickWidget->status() == QQuickWidget::Error) {
-        qWarning() << "MyAppPlugin: failed to load QML from" << qmlUrl;
-        for (const auto& e : quickWidget->errors())
-            qWarning() << e.toString();
-    }
-
-    return quickWidget;
-}
-
-void MyAppPlugin::destroyWidget(QWidget* widget) {
-    delete widget;
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosQmlModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
 }
 ```
 
-## Step 6: Backend Class
+Each module dependency must be built with its `.so`/`.dylib` present. Use `--override-input` at build time to point at a local checkout without editing `flake.nix` (see the Pure QML section above for the full table of approaches).
 
-`src/MyAppBackend.h`:
-
-```cpp
-#pragma once
-
-#include <QObject>
-#include <QString>
-#include <QVariantList>
-
-class LogosAPI;
-
-class MyAppBackend : public QObject {
-    Q_OBJECT
-    Q_PROPERTY(QVariantList items  READ items         NOTIFY itemsChanged)
-    Q_PROPERTY(int   itemCount     READ itemCount      NOTIFY itemCountChanged)
-    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
-
-public:
-    explicit MyAppBackend(LogosAPI* api, QObject* parent = nullptr);
-
-    QVariantList items() const;
-    int itemCount() const;
-    QString statusMessage() const;
-
-    Q_INVOKABLE void addItem(const QString& text);
-    Q_INVOKABLE void removeItem(int index);
-    Q_INVOKABLE void clearAll();
-
-signals:
-    void itemsChanged();
-    void itemCountChanged();
-    void statusMessageChanged();
-
-private:
-    LogosAPI* m_api;
-    QVariantList m_items;
-    QString m_statusMessage;
-};
-```
-
-**Rules for the backend:**
-
-- All business logic lives here, not in QML
-- Expose data via `Q_PROPERTY` with NOTIFY signals
-- Expose actions via `Q_INVOKABLE` methods
-- Call other modules via `LogosAPI`* here (never from QML JS)
-- `statusMessage` pattern is useful for showing feedback in the status bar
-
-## Step 7: `src/qml/Main.qml`
-
-```qml
-import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
-
-Rectangle {
-    anchors.fill: parent
-    color: "#1e1e1e"    // when inside Basecamp use Logos.Theme.backgroundColor
-
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
-
-        Text {
-            text: "My App"
-            font.pixelSize: 24
-            color: "#ffffff"
-        }
-
-        ListView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            model: backend.items
-            delegate: Text {
-                text: modelData.name
-                color: "#ffffff"
-            }
-        }
-
-        Button {
-            text: "Add Item"
-            onClicked: backend.addItem("New Item")
-        }
-
-        Text {
-            text: backend.statusMessage
-            color: "#a0a0a0"
-            font.pixelSize: 12
-        }
-    }
-}
-```
-
-**QML Rules:**
-
-- Access C++ backend via `backend` context property (set in `createWidget`)
-- Bind to `Q_PROPERTY` values; react to signals via `Connections { target: backend }`
-- When running inside Basecamp you can use `Logos.Theme` for colors and `Logos.Controls` for styled components
-- When running standalone (`nix run .`) use plain QtQuick (no Logos.Theme available)
-- Never put business logic in JavaScript
-
-## Step 8: Dev Mode (QML changes without rebuild)
+### Step 8: Build and Test
 
 ```bash
-export QML_PATH=$PWD/src/qml
-nix run .            # loads Main.qml from disk
-# Edit src/qml/Main.qml, then restart — no nix build needed
-```
-
-C++ changes (`.h`, `.cpp`, `CMakeLists.txt`, `metadata.json`) always require `nix build`.
-
-## Step 9: Build and Test
-
-```bash
-git init && git add -A   # nix needs files tracked
-nix build                # compiles the plugin
-nix run .                # launches standalone app (nix run .#app also works)
-```
-
-## Step 10: Load in Basecamp
-
-```bash
+git init && git add -A
 nix build
-cp -r result/* ~/.local/share/Logos/LogosBasecampDev/plugins/my_app/
-# Launch Basecamp — find my_app in sidebar
+nix run .          # standalone app with QML Inspector on localhost:3768
+
+# With a local module override:
+# nix run . --override-input some_module path:../logos-some-module
 ```
 
+### Step 9: Integration Testing (Optional)
+
+Create `tests/smoke.mjs`:
+
+```javascript
+const { resolve } = await import("node:path");
+const { test, run } = await import(
+  resolve(process.env.LOGOS_QT_MCP || "./result-mcp", "test-framework/framework.mjs")
+);
+
+test("my_app: add numbers", async (app) => {
+  await app.expectTexts(["Connecting to backend...", "Press Add"]);
+  // Wait for backend connection
+  await app.waitFor(
+    async () => { await app.expectTexts(["Connected"]); },
+    { timeout: 10000, description: "backend to connect" }
+  );
+  await app.click("Add");
+  await app.expectTexts(["Result:"]);
+});
+
+run();
+```
+
+Run: `nix build .#integration-test` (headless) or `node tests/smoke.mjs` (interactive, app must be running).
+
+The QML Inspector MCP tools (`qml_screenshot`, `qml_find_and_click`, `qml_get_tree`, etc.) are also available to AI agents via the `.mcp.json` that auto-registers when the app is running.

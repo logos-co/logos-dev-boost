@@ -71,7 +71,13 @@ function inspectProject(dir: string): ProjectInfo {
     info.name = metadata.name || "unknown";
     info.version = metadata.version || "0.0.0";
     info.description = metadata.description || "";
-    info.projectType = metadata.type === "ui" ? "ui-app" : "module";
+    if (metadata.type === "ui_qml") {
+      info.projectType = metadata.main ? "ui-qml-backend" : "ui-qml";
+    } else if (metadata.type === "ui") {
+      info.projectType = "ui-qml"; // legacy type
+    } else {
+      info.projectType = "module";
+    }
     info.interfaceType = metadata.interface === "universal" ? "universal" : "legacy";
     info.dependencies = metadata.dependencies || [];
 

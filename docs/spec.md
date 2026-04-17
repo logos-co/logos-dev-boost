@@ -17,7 +17,7 @@ logos-dev-boost addresses this by operating at three levels:
 | Term | Definition |
 |------|------------|
 | **Universal Module** | A Logos module whose implementation is pure C++ (no Qt types). All Qt glue is generated at build time by `logos-cpp-generator --from-header`. Identified by `"interface": "universal"` in metadata.json. |
-| **UI App** | A Qt plugin loaded directly by Logos Basecamp into its process. Provides a graphical widget (tab in the MDI workspace). Uses `IComponent` for C++ plugins or QML packages. Identified by `"type": "ui"` in metadata.json. |
+| **UI App** | A QML-based UI component displayed as a tab in Basecamp's MDI workspace. Either pure QML (calls backend modules via `logos.callModule()`) or QML + process-isolated C++ backend (Qt Remote Objects). Identified by `"type": "ui_qml"` in metadata.json. |
 | **LIDL** | Logos Interface Definition Language — a lightweight DSL for declaring module interfaces. Alternative to the `--from-header` C++ parser path. Both produce identical generated output. |
 | **Provider Glue** | Generated code (`_qt_glue.h`, `_dispatch.cpp`) that wraps a pure C++ implementation class in a `LogosProviderObject` with `callMethod()` dispatch and `getMethods()` introspection. |
 | **Client Stub** | Generated type-safe C++ wrapper class that callers use to invoke a module's methods without string-based dispatch. |
@@ -39,22 +39,22 @@ This distinction is fundamental to the entire Logos ecosystem and to everything 
 
 Reference implementation: `logos-accounts-module` — `metadata.json` has `"interface": "universal"`, `src/accounts_module_impl.h` is pure C++, `flake.nix` runs the code generator in `preConfigure`.
 
-**UI Apps** are Qt plugins loaded directly by Basecamp into its own process. Either C++ (`IComponent` + `createWidget/destroyWidget` + optional QML via `QQuickWidget`) or pure QML packages. UI Apps provide a graphical interface displayed as a tab in the MDI workspace. They call Logos Modules via `LogosAPI` or `LogosQmlBridge` for backend services.
+**UI Apps** (`"type": "ui_qml"`) are QML-based UI components displayed as tabs in Basecamp's MDI workspace. Two subtypes exist: pure QML apps (no C++, call backend modules via `logos.callModule()`) and QML + C++ backend apps (process-isolated C++ backend communicating via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
 ```
-                   Logos Module (universal)             UI App (IComponent + QML)
+                   Logos Module (universal)             UI App (ui_qml)
                    ─────────────────────────            ──────────────────────────
-User writes:       Pure C++ impl header                 IComponent + QObject backend + QML
-                   (std::string, int64_t, etc.)         (Qt types OK)
+User writes:       Pure C++ impl header                 QML (pure) or QML + .rep + C++ plugin
+                   (std::string, int64_t, etc.)         (Qt types OK in backend)
 
-Generated:         Qt glue, dispatch, plugin class      Nothing (hand-written)
+Generated:         Qt glue, dispatch, plugin class      QTRO source/replica (from .rep)
                    (logos-cpp-generator --from-header)
 
-metadata.json:     "interface": "universal"             "type": "ui"
-                   "type": "core"
+metadata.json:     "interface": "universal"             "type": "ui_qml"
+                   "type": "core"                       "view": "Main.qml"
 
-Loaded by:         logoscore / liblogos_core            Basecamp (QPluginLoader)
-Runs in:           Isolated logos_host process           Basecamp process
+Loaded by:         logoscore / liblogos_core            Basecamp / standalone runner
+Runs in:           Isolated logos_host process           QML in-process, C++ backend in logos_host
 Has UI:            No                                   Yes (tab in MDI workspace)
 ```
 
@@ -263,14 +263,61 @@ The external C API is accessed via `extern "C"` includes. The impl class present
 
 **Steps 4+:** Same as Journey 1 (build, test, package).
 
-### Journey 3: Create a UI App (C++ + QML)
+### Journey 3a: Create a Pure QML UI App
 
-A Basecamp UI App with C++ backend and QML frontend.
+A Basecamp UI App with no C++ — QML only, calls backend modules via `logos.callModule()`.
 
 **Step 1: Scaffold**
 
 ```bash
-nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-app
+nix run github:logos-co/logos-dev-boost -- init notes_ui --type ui-qml
+```
+
+Output:
+
+```
+notes_ui/
+├── Main.qml                      # QML entry point
+├── metadata.json                 # "type": "ui_qml", "view": "Main.qml"
+├── flake.nix                     # mkLogosQmlModule
+├── CLAUDE.md
+└── AGENTS.md
+```
+
+**Step 2: Develop the QML UI**
+
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+
+Item {
+    Button {
+        text: "Save Note"
+        onClicked: {
+            var result = logos.callModule("storage_module", "save", [noteField.text])
+            console.log("Saved:", result)
+        }
+    }
+}
+```
+
+**Step 3: Build and run**
+
+```bash
+nix build
+nix run .    # standalone app with QML Inspector on localhost:3768
+```
+
+The QML Inspector MCP server starts automatically. AI agents can use `qml_screenshot`, `qml_find_and_click`, `qml_get_tree`, etc. to interact with and verify the UI. Write `.mjs` test files in `tests/` for headless CI testing via `nix build .#integration-test`.
+
+### Journey 3b: Create a QML + C++ Backend UI App
+
+A Basecamp UI App with process-isolated C++ backend and QML frontend.
+
+**Step 1: Scaffold**
+
+```bash
+nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-qml-backend
 ```
 
 Output:
@@ -278,107 +325,99 @@ Output:
 ```
 notes_app/
 ├── src/
-│   ├── NotesPlugin.h             # IComponent implementation
-│   ├── NotesPlugin.cpp           # createWidget / destroyWidget
-│   ├── NotesBackend.h            # QObject backend (Q_PROPERTY, Q_INVOKABLE)
-│   ├── NotesBackend.cpp          # Business logic (C++ side)
+│   ├── notes_app.rep             # Qt Remote Objects interface
+│   ├── notes_app_interface.h     # extends PluginInterface
+│   ├── notes_app_plugin.h        # SimpleSource + ViewPluginBase
+│   ├── notes_app_plugin.cpp      # implementation
 │   └── qml/
-│       ├── Main.qml              # QML UI
-│       └── resources.qrc         # Resource bundle
-├── metadata.json                 # "type": "ui"
-├── CMakeLists.txt
-├── flake.nix
+│       └── Main.qml              # QML frontend (logos.module() replica)
+├── metadata.json                 # "type": "ui_qml", "main": "notes_app_plugin"
+├── CMakeLists.txt                # REP_FILE
+├── flake.nix                     # mkLogosQmlModule
 ├── CLAUDE.md
 └── AGENTS.md
 ```
 
-**Step 2: Develop the C++ backend layer**
+**Step 2: Define the backend interface (.rep file)**
+
+```
+class NotesApp
+{
+    PROP(QString status READWRITE)
+    PROP(QVariantList notes READWRITE)
+    SLOT(void addNote(const QString& title))
+    SLOT(void deleteNote(int index))
+}
+```
+
+**Step 3: Implement the C++ backend**
 
 ```cpp
-class NotesBackend : public QObject {
+class NotesAppPlugin : public NotesAppSimpleSource,
+                       public NotesAppInterface,
+                       public NotesAppViewPluginBase
+{
     Q_OBJECT
-    Q_PROPERTY(QVariantList notes READ notes NOTIFY notesChanged)
+    Q_PLUGIN_METADATA(IID NotesAppInterface_iid FILE "metadata.json")
+    Q_INTERFACES(NotesAppInterface)
+
 public:
-    explicit NotesBackend(LogosAPI* api, QObject* parent = nullptr);
-    QVariantList notes() const;
+    Q_INVOKABLE void initLogos(LogosAPI* api) {
+        m_logosAPI = api;
+        setBackend(this);
+    }
 
-    Q_INVOKABLE void addNote(const QString& title, const QString& body);
-    Q_INVOKABLE void deleteNote(int index);
-
-signals:
-    void notesChanged();
-
-private:
-    LogosAPI* m_api;
-    QVariantList m_notes;
+    void addNote(const QString& title) override { /* ... */ }
+    void deleteNote(int index) override { /* ... */ }
 };
 ```
 
-**Step 3: Develop the QML layer**
+**Step 4: Develop the QML frontend**
 
 ```qml
 import QtQuick
-import QtQuick.Layouts
-import Logos.Theme
-import Logos.Controls
+import QtQuick.Controls
 
-Rectangle {
-    color: Logos.Theme.backgroundColor
+Item {
+    readonly property var backend: logos.module("notes_app")
+    readonly property bool ready: logos.isViewModuleReady("notes_app")
 
-    RowLayout {
-        anchors.fill: parent
+    ListView {
+        model: backend ? backend.notes : []
+        delegate: Text { text: modelData.title }
+    }
 
-        ListView {
-            Layout.preferredWidth: 250
-            model: backend.notes
-            delegate: LogosText {
-                text: modelData.title
-            }
-        }
-
-        ColumnLayout {
-            LogosText {
-                text: backend.currentNote.title
-                font.pixelSize: 20
-            }
-            TextArea {
-                text: backend.currentNote.body
-                color: Logos.Theme.textColor
-            }
-        }
+    Button {
+        text: "Add Note"
+        enabled: root.ready
+        onClicked: logos.watch(backend.addNote("New Note"),
+            function() { console.log("Added") },
+            function(err) { console.log("Error:", err) }
+        )
     }
 }
 ```
 
-**Step 4: Build and test in Basecamp**
+**Step 5: Build and test**
 
 ```bash
 nix build
-cp -r result/* ~/.local/share/Logos/LogosBasecampDev/plugins/notes_app/
-# Launch Basecamp, find notes_app in sidebar
+nix run .    # standalone app with QML Inspector on localhost:3768
 ```
 
-**Step 5: Call Logos Modules from the UI App**
-
-```cpp
-// C++ backend uses LogosAPI directly:
-QVariant result = m_api->callModule("storage", "save", {key, value});
-
-// QML uses the bridge:
-// logos.callModule("storage", "save", [key, value])
-```
+AI agents can test the running UI via MCP tools (`qml_screenshot`, `qml_find_and_click`, etc.). Write `.mjs` test files in `tests/` for headless CI via `nix build .#integration-test`.
 
 **The C++/QML boundary** (taught by guidelines):
 
 | Concern | Goes in C++ | Goes in QML |
 |---------|-------------|-------------|
-| Data models, state | `Q_PROPERTY` on `QObject` | Bind to `backend.property` |
-| Business logic | Methods on backend class | Never — no JS business logic |
-| Module calls | `LogosAPI::callModule()` | `logos.callModule()` (thin wrapper) |
+| Data models, state | `PROP()` in `.rep` file | Bind to `backend.property` |
+| Business logic | `SLOT()` in `.rep` + implement in plugin | Never — no JS business logic |
+| Module calls | `LogosAPI*` in `initLogos()` | `logos.callModule()` (pure QML only) |
 | File I/O, networking | Always C++ | Never |
 | UI layout, styling | Never | Always — `Logos.Theme`, `Logos.Controls` |
-| User interactions | `Q_INVOKABLE` slots | `onClicked: backend.doThing()` |
-| Plugin lifecycle | `IComponent::createWidget/destroyWidget` | N/A |
+| User interactions | `SLOT()` methods | `logos.watch(backend.doX())` |
+| Plugin lifecycle | `initLogos()` + `setBackend(this)` | N/A |
 
 ### Journey 4: AI Agent Building a Module from Scratch
 
@@ -475,7 +514,7 @@ Generated:
 1. **Module creation time** — An AI agent can scaffold, build, and test a new universal C++ module in under 5 minutes (currently impossible without deep knowledge)
 2. **Zero hallucinated APIs** — Agents never suggest non-existent Logos APIs or use Qt types in universal module code
 3. **Build success rate** — Agent-generated Nix flakes and C++ impl headers build on first try
-4. **Correct interface choice** — Agents use the universal interface for modules and IComponent for UI apps, never mixing the two
+4. **Correct interface choice** — Agents use the universal interface for modules and ui_qml for UI apps, never mixing the two
 5. **Onboarding time** — New human developers can create their first module in under 30 minutes with AI assistance
 
 ## Supported Platforms

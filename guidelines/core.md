@@ -6,9 +6,9 @@ Logos has two fundamentally different types of components. Always identify which
 
 **Logos Modules** (`"type": "core"`) — Process-isolated backend services. Pure C++ implementation using standard types. No Qt types in user code. All Qt glue is generated at build time. Loaded by `logoscore` or `liblogos_core`. Each runs in its own `logos_host` subprocess.
 
-**UI Apps** (`"type": "ui"`) — Qt plugins loaded directly by Basecamp. Provide a graphical widget in the MDI workspace. Use `IComponent` for C++ plugins or QML packages. Run in the Basecamp process.
+**UI Apps** (`"type": "ui_qml"`) — QML-based UI apps displayed as tabs in Basecamp's MDI workspace. Two subtypes: pure QML (no C++, calls modules via `logos.callModule()`) or QML + C++ backend (process-isolated via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
-**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, IComponent). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it via LogosAPI.
+**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, ui_qml). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it, or use a QML + backend app.
 
 ## Module Naming
 
@@ -32,16 +32,25 @@ my_module/
 └── tests/
 ```
 
-UI app:
+Pure QML app:
+```
+my_app/
+├── Main.qml                      # QML entry point
+├── metadata.json                 # "type": "ui_qml", "view": "Main.qml"
+└── flake.nix                     # mkLogosQmlModule
+```
+
+QML + C++ backend app:
 ```
 my_app/
 ├── src/
-│   ├── MyAppPlugin.h/cpp         # IComponent implementation
-│   ├── MyAppBackend.h/cpp        # QObject backend
-│   └── qml/Main.qml              # QML UI
-├── metadata.json                 # "type": "ui"
-├── CMakeLists.txt
-└── flake.nix
+│   ├── my_app.rep                # Qt Remote Objects interface
+│   ├── my_app_interface.h        # extends PluginInterface
+│   ├── my_app_plugin.h/cpp       # SimpleSource + ViewPluginBase
+│   └── qml/Main.qml              # QML frontend (logos.module() replica)
+├── metadata.json                 # "type": "ui_qml", "main": "my_app_plugin"
+├── CMakeLists.txt                # logos_module() with REP_FILE
+└── flake.nix                     # mkLogosQmlModule
 ```
 
 ## metadata.json Is the Source of Truth

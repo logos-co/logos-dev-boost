@@ -19,7 +19,7 @@ logos-dev-boost addresses this by operating at three levels:
 | Term | Definition |
 |------|------------|
 | **Universal Module** | A Logos module whose implementation is pure C++ (no Qt types). All Qt glue is generated at build time by `logos-cpp-generator --from-header`. Identified by `"interface": "universal"` in metadata.json. |
-| **UI App** | A Qt plugin loaded directly by Logos Basecamp into its process. Provides a graphical widget (tab in the MDI workspace). Uses `IComponent` for C++ plugins or QML packages. Identified by `"type": "ui"` in metadata.json. |
+| **UI App** | A QML-based UI component displayed as a tab in Basecamp's MDI workspace. Either pure QML (calls backend modules via `logos.callModule()`) or QML + process-isolated C++ backend (Qt Remote Objects). Identified by `"type": "ui_qml"` in metadata.json. |
 | **LIDL** | Logos Interface Definition Language — a lightweight DSL for declaring module interfaces. Alternative to the `--from-header` C++ parser path. Both produce identical generated output. |
 | **Provider Glue** | Generated code (`_qt_glue.h`, `_dispatch.cpp`) that wraps a pure C++ implementation class in a `LogosProviderObject` with `callMethod()` dispatch and `getMethods()` introspection. |
 | **Client Stub** | Generated type-safe C++ wrapper class that callers use to invoke a module's methods without string-based dispatch. |
@@ -41,22 +41,22 @@ This distinction is fundamental to the entire Logos ecosystem and to everything 
 
 Reference implementation: `logos-accounts-module` — `metadata.json` has `"interface": "universal"`, `src/accounts_module_impl.h` is pure C++, `flake.nix` runs the code generator in `preConfigure`.
 
-**UI Apps** are Qt plugins loaded directly by Basecamp into its own process. Either C++ (`IComponent` + `createWidget/destroyWidget` + optional QML via `QQuickWidget`) or pure QML packages. UI Apps provide a graphical interface displayed as a tab in the MDI workspace. They call Logos Modules via `LogosAPI` or `LogosQmlBridge` for backend services.
+**UI Apps** (`"type": "ui_qml"`) are QML-based UI components displayed as tabs in Basecamp's MDI workspace. Two subtypes exist: pure QML apps (no C++, call backend modules via `logos.callModule()`) and QML + C++ backend apps (process-isolated C++ backend communicating via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
 ```
-                   Logos Module (universal)             UI App (IComponent + QML)
+                   Logos Module (universal)             UI App (ui_qml)
                    ─────────────────────────            ──────────────────────────
-User writes:       Pure C++ impl header                 IComponent + QObject backend + QML
-                   (std::string, int64_t, etc.)         (Qt types OK)
+User writes:       Pure C++ impl header                 QML (pure) or QML + .rep + C++ plugin
+                   (std::string, int64_t, etc.)         (Qt types OK in backend)
 
-Generated:         Qt glue, dispatch, plugin class      Nothing (hand-written)
+Generated:         Qt glue, dispatch, plugin class      QTRO source/replica (from .rep)
                    (logos-cpp-generator --from-header)
 
-metadata.json:     "interface": "universal"             "type": "ui"
-                   "type": "core"
+metadata.json:     "interface": "universal"             "type": "ui_qml"
+                   "type": "core"                       "view": "Main.qml"
 
-Loaded by:         logoscore / liblogos_core            Basecamp (QPluginLoader)
-Runs in:           Isolated logos_host process           Basecamp process
+Loaded by:         logoscore / liblogos_core            Basecamp / standalone runner
+Runs in:           Isolated logos_host process           QML in-process, C++ backend in logos_host
 Has UI:            No                                   Yes (tab in MDI workspace)
 ```
 
@@ -126,7 +126,9 @@ crypto_utils/
 ├── CMakeLists.txt                # logos_module() with generated_code sources
 ├── flake.nix                     # preConfigure runs logos-cpp-generator --from-header
 ├── tests/
-│   └── test_crypto_utils.cpp     # Unit tests against impl class directly
+│   ├── main.cpp                  # LOGOS_TEST_MAIN() entry point
+│   ├── test_crypto_utils.cpp     # Unit tests using LOGOS_TEST() and assertions
+│   └── CMakeLists.txt            # logos_test() macro (auto-detected by builder)
 ├── CLAUDE.md                     # Generated: knows this is a universal module
 ├── AGENTS.md                     # Universal context for any AI tool
 └── .mcp.json                     # MCP server registration
@@ -180,10 +182,10 @@ logoscore -m ./result/lib -l crypto_utils \
 **Step 5: Unit test (no logoscore needed)**
 
 ```bash
-nix flake check -L
+nix build .#unit-tests -L
 ```
 
-Unit tests instantiate `CryptoUtilsImpl` directly — it is a plain C++ class with no framework dependencies.
+Unit tests use logos-test-framework (`LOGOS_TEST()` macros, `LOGOS_ASSERT_*`) and instantiate `CryptoUtilsImpl` directly — it is a plain C++ class with no framework dependencies. `logos-module-builder` auto-detects `tests/CMakeLists.txt` and creates the `unit-tests` target.
 
 **Step 6: Inter-module communication**
 
@@ -210,7 +212,7 @@ lgx verify crypto_utils.lgx
 - Step 1: `init` command scaffolds from universal module template; generated CLAUDE.md/AGENTS.md teach agents the universal pattern
 - Step 2: Guidelines ensure pure C++, no Qt types; the type mapping table is always available
 - Step 3: Build help explains the codegen pipeline; troubleshooting for common generator errors
-- Steps 4-5: Testing skill covers logoscore integration tests and direct unit tests
+- Steps 4-5: Testing skill covers logos-test-framework unit tests (LOGOS_TEST, LogosTestContext, mocking) and logoscore integration tests
 - Step 6: Inter-module comm skill explains LogosAPI patterns and dependency declaration
 - Step 7: Packaging skill covers the full LGX workflow
 
@@ -263,14 +265,61 @@ The external C API is accessed via `extern "C"` includes. The impl class present
 
 **Steps 4+:** Same as Journey 1 (build, test, package).
 
-### Journey 3: Create a UI App (C++ + QML)
+### Journey 3a: Create a Pure QML UI App
 
-A Basecamp UI App with C++ backend and QML frontend.
+A Basecamp UI App with no C++ — QML only, calls backend modules via `logos.callModule()`.
 
 **Step 1: Scaffold**
 
 ```bash
-nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-app
+nix run github:logos-co/logos-dev-boost -- init notes_ui --type ui-qml
+```
+
+Output:
+
+```
+notes_ui/
+├── Main.qml                      # QML entry point
+├── metadata.json                 # "type": "ui_qml", "view": "Main.qml"
+├── flake.nix                     # mkLogosQmlModule
+├── CLAUDE.md
+└── AGENTS.md
+```
+
+**Step 2: Develop the QML UI**
+
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+
+Item {
+    Button {
+        text: "Save Note"
+        onClicked: {
+            var result = logos.callModule("storage_module", "save", [noteField.text])
+            console.log("Saved:", result)
+        }
+    }
+}
+```
+
+**Step 3: Build and run**
+
+```bash
+nix build
+nix run .    # standalone app with QML Inspector on localhost:3768
+```
+
+The QML Inspector MCP server starts automatically. AI agents can use `qml_screenshot`, `qml_find_and_click`, `qml_get_tree`, etc. to interact with and verify the UI. Write `.mjs` test files in `tests/` for headless CI testing via `nix build .#integration-test`.
+
+### Journey 3b: Create a QML + C++ Backend UI App
+
+A Basecamp UI App with process-isolated C++ backend and QML frontend.
+
+**Step 1: Scaffold**
+
+```bash
+nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-qml-backend
 ```
 
 Output:
@@ -278,107 +327,99 @@ Output:
 ```
 notes_app/
 ├── src/
-│   ├── NotesPlugin.h             # IComponent implementation
-│   ├── NotesPlugin.cpp           # createWidget / destroyWidget
-│   ├── NotesBackend.h            # QObject backend (Q_PROPERTY, Q_INVOKABLE)
-│   ├── NotesBackend.cpp          # Business logic (C++ side)
+│   ├── notes_app.rep             # Qt Remote Objects interface
+│   ├── notes_app_interface.h     # extends PluginInterface
+│   ├── notes_app_plugin.h        # SimpleSource + ViewPluginBase
+│   ├── notes_app_plugin.cpp      # implementation
 │   └── qml/
-│       ├── Main.qml              # QML UI
-│       └── resources.qrc         # Resource bundle
-├── metadata.json                 # "type": "ui"
-├── CMakeLists.txt
-├── flake.nix
+│       └── Main.qml              # QML frontend (logos.module() replica)
+├── metadata.json                 # "type": "ui_qml", "main": "notes_app_plugin"
+├── CMakeLists.txt                # REP_FILE
+├── flake.nix                     # mkLogosQmlModule
 ├── CLAUDE.md
 └── AGENTS.md
 ```
 
-**Step 2: Develop the C++ backend layer**
+**Step 2: Define the backend interface (.rep file)**
+
+```
+class NotesApp
+{
+    PROP(QString status READWRITE)
+    PROP(QVariantList notes READWRITE)
+    SLOT(void addNote(const QString& title))
+    SLOT(void deleteNote(int index))
+}
+```
+
+**Step 3: Implement the C++ backend**
 
 ```cpp
-class NotesBackend : public QObject {
+class NotesAppPlugin : public NotesAppSimpleSource,
+                       public NotesAppInterface,
+                       public NotesAppViewPluginBase
+{
     Q_OBJECT
-    Q_PROPERTY(QVariantList notes READ notes NOTIFY notesChanged)
+    Q_PLUGIN_METADATA(IID NotesAppInterface_iid FILE "metadata.json")
+    Q_INTERFACES(NotesAppInterface)
+
 public:
-    explicit NotesBackend(LogosAPI* api, QObject* parent = nullptr);
-    QVariantList notes() const;
+    Q_INVOKABLE void initLogos(LogosAPI* api) {
+        m_logosAPI = api;
+        setBackend(this);
+    }
 
-    Q_INVOKABLE void addNote(const QString& title, const QString& body);
-    Q_INVOKABLE void deleteNote(int index);
-
-signals:
-    void notesChanged();
-
-private:
-    LogosAPI* m_api;
-    QVariantList m_notes;
+    void addNote(const QString& title) override { /* ... */ }
+    void deleteNote(int index) override { /* ... */ }
 };
 ```
 
-**Step 3: Develop the QML layer**
+**Step 4: Develop the QML frontend**
 
 ```qml
 import QtQuick
-import QtQuick.Layouts
-import Logos.Theme
-import Logos.Controls
+import QtQuick.Controls
 
-Rectangle {
-    color: Logos.Theme.backgroundColor
+Item {
+    readonly property var backend: logos.module("notes_app")
+    readonly property bool ready: logos.isViewModuleReady("notes_app")
 
-    RowLayout {
-        anchors.fill: parent
+    ListView {
+        model: backend ? backend.notes : []
+        delegate: Text { text: modelData.title }
+    }
 
-        ListView {
-            Layout.preferredWidth: 250
-            model: backend.notes
-            delegate: LogosText {
-                text: modelData.title
-            }
-        }
-
-        ColumnLayout {
-            LogosText {
-                text: backend.currentNote.title
-                font.pixelSize: 20
-            }
-            TextArea {
-                text: backend.currentNote.body
-                color: Logos.Theme.textColor
-            }
-        }
+    Button {
+        text: "Add Note"
+        enabled: root.ready
+        onClicked: logos.watch(backend.addNote("New Note"),
+            function() { console.log("Added") },
+            function(err) { console.log("Error:", err) }
+        )
     }
 }
 ```
 
-**Step 4: Build and test in Basecamp**
+**Step 5: Build and test**
 
 ```bash
 nix build
-cp -r result/* ~/.local/share/Logos/LogosBasecampDev/plugins/notes_app/
-# Launch Basecamp, find notes_app in sidebar
+nix run .    # standalone app with QML Inspector on localhost:3768
 ```
 
-**Step 5: Call Logos Modules from the UI App**
-
-```cpp
-// C++ backend uses LogosAPI directly:
-QVariant result = m_api->callModule("storage", "save", {key, value});
-
-// QML uses the bridge:
-// logos.callModule("storage", "save", [key, value])
-```
+AI agents can test the running UI via MCP tools (`qml_screenshot`, `qml_find_and_click`, etc.). Write `.mjs` test files in `tests/` for headless CI via `nix build .#integration-test`.
 
 **The C++/QML boundary** (taught by guidelines):
 
 | Concern | Goes in C++ | Goes in QML |
 |---------|-------------|-------------|
-| Data models, state | `Q_PROPERTY` on `QObject` | Bind to `backend.property` |
-| Business logic | Methods on backend class | Never — no JS business logic |
-| Module calls | `LogosAPI::callModule()` | `logos.callModule()` (thin wrapper) |
+| Data models, state | `PROP()` in `.rep` file | Bind to `backend.property` |
+| Business logic | `SLOT()` in `.rep` + implement in plugin | Never — no JS business logic |
+| Module calls | `LogosAPI*` in `initLogos()` | `logos.callModule()` (pure QML only) |
 | File I/O, networking | Always C++ | Never |
 | UI layout, styling | Never | Always — `Logos.Theme`, `Logos.Controls` |
-| User interactions | `Q_INVOKABLE` slots | `onClicked: backend.doThing()` |
-| Plugin lifecycle | `IComponent::createWidget/destroyWidget` | N/A |
+| User interactions | `SLOT()` methods | `logos.watch(backend.doX())` |
+| Plugin lifecycle | `initLogos()` + `setBackend(this)` | N/A |
 
 ### Journey 4: AI Agent Building a Module from Scratch
 
@@ -394,7 +435,7 @@ What happens when a developer tells an AI agent "create a module that provides e
 
 5. Agent builds with `nix build` — build-help guidelines explain the pipeline. If errors occur, agent knows common fixes: generator type mapping issues, missing `find_package`, `metadata.json`/header class name mismatch.
 
-6. Agent tests with `logoscore` — testing skill provides exact commands and expected output patterns.
+6. Agent runs unit tests with `nix build .#unit-tests -L` — the scaffolded `tests/` directory uses logos-test-framework (`LOGOS_TEST()`, `LOGOS_ASSERT_*`). Tests are auto-detected by `logos-module-builder`. Agent also tests with `logoscore` for integration testing — testing skill provides exact commands and expected output patterns.
 
 **Without logos-dev-boost:** Agent would write `Q_INVOKABLE` methods, use `QString` everywhere, try `cmake --build` instead of `nix build`, hallucinate a `LogosPlugin` base class that doesn't exist, and have no idea about the code generator pipeline.
 
@@ -475,7 +516,7 @@ Generated:
 1. **Module creation time** — An AI agent can scaffold, build, and test a new universal C++ module in under 5 minutes (currently impossible without deep knowledge)
 2. **Zero hallucinated APIs** — Agents never suggest non-existent Logos APIs or use Qt types in universal module code
 3. **Build success rate** — Agent-generated Nix flakes and C++ impl headers build on first try
-4. **Correct interface choice** — Agents use the universal interface for modules and IComponent for UI apps, never mixing the two
+4. **Correct interface choice** — Agents use the universal interface for modules and ui_qml for UI apps, never mixing the two
 5. **Onboarding time** — New human developers can create their first module in under 30 minutes with AI assistance
 
 ## Supported Platforms
@@ -502,7 +543,7 @@ logos-dev-boost/
 ├── guidelines/                       # Always-loaded AI conventions
 │   ├── core.md                       # Two component types, naming, file structure
 │   ├── universal-module.md           # Pure C++ impl pattern, type mapping, codegen
-│   ├── ui-app.md                     # IComponent, C++/QML boundary, backend pattern
+│   ├── ui-app.md                     # ui_qml apps: pure QML + QML with C++ backend
 │   ├── nix-build.md                  # Flake structure, build commands, overrides
 │   ├── testing.md                    # logoscore, unit tests, TEST_GROUPS
 │   ├── metadata-json.md              # Full metadata.json schema
@@ -510,7 +551,7 @@ logos-dev-boost/
 ├── skills/                           # On-demand task knowledge (agentskills.io)
 │   ├── create-universal-module/      # Scaffold + implement a universal C++ module
 │   ├── wrap-external-lib/            # Wrap a C/C++ library as a module
-│   ├── create-ui-app/                # IComponent + QML UI app for Basecamp
+│   ├── create-ui-app/                # QML UI app for Basecamp (pure QML or QML + backend)
 │   ├── package-lgx/                  # Create + distribute LGX packages
 │   ├── inter-module-comm/            # LogosAPI patterns, dependency declaration
 │   ├── testing-modules/              # logoscore + unit testing patterns
@@ -519,7 +560,7 @@ logos-dev-boost/
 ├── templates/                        # Scaffolding templates (used by init command)
 │   ├── universal-module/             # Pure C++ module
 │   ├── universal-module-extlib/      # With external library wrapping
-│   └── ui-app/                       # IComponent + QML app
+│   └── ui-app/                       # QML UI app (pure QML + QML with backend)
 ├── generators/                       # Context file generators (TypeScript)
 │   ├── generate-agents-md.ts         # AGENTS.md with compressed docs index
 │   ├── generate-claude-md.ts         # CLAUDE.md (imports AGENTS.md content)
@@ -571,7 +612,7 @@ Guidelines are Markdown files loaded into the always-on context (AGENTS.md / CLA
 |-----------|---------|
 | `core.md` | Two component types (Universal Module vs UI App), naming conventions, file structure, `metadata.json` as source of truth |
 | `universal-module.md` | Pure C++ impl pattern, type mapping table, `"interface": "universal"`, impl class naming (`<name>_impl.h`), public methods = module API |
-| `ui-app.md` | `IComponent` pattern, C++/QML boundary table, `QObject` backend with `Q_PROPERTY`/`Q_INVOKABLE`, `LogosQmlBridge` |
+| `ui-app.md` | `ui_qml` apps: pure QML (logos.callModule bridge) and QML + C++ backend (Qt Remote Objects, .rep file, SimpleSource + ViewPluginBase, logos.module() replica) |
 | `nix-build.md` | Flake structure, `follows` declarations, `preConfigure` for codegen, build commands, `--auto-local` |
 | `testing.md` | Unit tests (call impl class directly), logoscore integration tests, `TEST_GROUPS`, `nix flake check` |
 | `metadata-json.md` | Full schema including `"interface"`, `"dependencies"`, `"nix"` config, `"external_libraries"`, `"cmake"` settings |
@@ -585,7 +626,7 @@ Skills are on-demand knowledge modules following the agentskills.io specificatio
 |-------|---------|---------|
 | `create-universal-module` | Creating a new Logos module | Full scaffold: metadata.json, flake.nix with preConfigure, CMakeLists.txt, impl header template |
 | `wrap-external-lib` | Wrapping a C/C++ library | External library config, `extern "C"` patterns, based on logos-accounts-module |
-| `create-ui-app` | Creating a Basecamp UI app | IComponent scaffold, QQuickWidget, QML Main.qml, backend class |
+| `create-ui-app` | Creating a Basecamp UI app | Two paths: pure QML (Main.qml + logos.callModule) or QML + C++ backend (.rep, SimpleSource, ViewPluginBase, logos.module replica) |
 | `package-lgx` | Packaging for distribution | lgx create/add/verify workflow, portable builds, nix-bundle-lgx |
 | `inter-module-comm` | Module-to-module calls | `LogosAPI::callModule()`, dependency declaration, `LogosResult` handling |
 | `testing-modules` | Writing tests | Unit tests, logoscore integration, TEST_GROUPS, mock transport |
@@ -603,7 +644,7 @@ TypeScript scripts that produce IDE-specific context files from the guidelines a
 | `generate-cursor-rules.ts` | `.cursor/rules/logos.mdc` | Cursor-specific rules with file glob patterns for activation. |
 | `generate-llms-txt.ts` | `llms.txt`, `llms-full.txt` | Machine-readable documentation index following the llms.txt specification. |
 
-Generators detect the project type from `metadata.json` (`"interface": "universal"` vs `"type": "ui"`) and include context specific to that project type.
+Generators detect the project type from `metadata.json` (`"interface": "universal"` vs `"type": "ui_qml"`) and include context specific to that project type.
 
 ### MCP Server
 
@@ -635,17 +676,18 @@ The installer (`install.ts`) performs interactive setup:
 Scaffold a new Logos project.
 
 ```bash
-nix run github:logos-co/logos-dev-boost -- init <name> --type <module|ui-app> [--external-lib]
+nix run github:logos-co/logos-dev-boost -- init <name> --type <module|ui-qml|ui-qml-backend> [--external-lib]
 ```
 
 | Argument | Description |
 |----------|-------------|
-| `<name>` | Project name (snake_case for modules, e.g., `crypto_utils`) |
+| `<name>` | Project name (snake_case, e.g., `crypto_utils`) |
 | `--type module` | Universal C++ module (default) |
-| `--type ui-app` | IComponent + QML UI app for Basecamp |
+| `--type ui-qml` | Pure QML UI app for Basecamp (no C++) |
+| `--type ui-qml-backend` | QML + process-isolated C++ backend UI app |
 | `--external-lib` | Add external library wrapping scaffold (modules only) |
 
-Creates the directory, runs the appropriate `nix flake init -t logos-module-builder` template, adds the universal module impl layer, generates AI context files, and initializes git.
+Creates the directory, generates the appropriate template (mkLogosModule for modules, mkLogosQmlModule for UI apps), adds AI context files, and initializes git.
 
 ### `logos-dev-boost install`
 
@@ -720,7 +762,7 @@ Module authors can ship skills in their repos at `resources/boost/skills/<skill-
 logos-dev-boost wraps `logos-module-builder` for scaffolding — it does not duplicate its templates. The `init` command calls `nix flake init -t logos-module-builder` (appropriate variant) and then layers on:
 
 - Universal module impl header template (for `--type module`)
-- IComponent + QML template (for `--type ui-app`)
+- Pure QML template (for `--type ui-qml`) or QML + C++ backend template (for `--type ui-qml-backend`)
 - AI context files (AGENTS.md, CLAUDE.md, .mcp.json)
 - Test skeleton
 
@@ -868,9 +910,9 @@ Logos has two fundamentally different types of components. Always identify which
 
 **Logos Modules** (`"type": "core"`) — Process-isolated backend services. Pure C++ implementation using standard types. No Qt types in user code. All Qt glue is generated at build time. Loaded by `logoscore` or `liblogos_core`. Each runs in its own `logos_host` subprocess.
 
-**UI Apps** (`"type": "ui"`) — Qt plugins loaded directly by Basecamp. Provide a graphical widget in the MDI workspace. Use `IComponent` for C++ plugins or QML packages. Run in the Basecamp process.
+**UI Apps** (`"type": "ui_qml"`) — QML-based UI apps displayed as tabs in Basecamp's MDI workspace. Two subtypes: pure QML (no C++, calls modules via `logos.callModule()`) or QML + C++ backend (process-isolated via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
-**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, IComponent). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it via LogosAPI.
+**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, ui_qml). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it, or use a QML + backend app.
 
 ## Module Naming
 
@@ -894,16 +936,25 @@ my_module/
 └── tests/
 ```
 
-UI app:
+Pure QML app:
+```
+my_app/
+├── Main.qml                      # QML entry point
+├── metadata.json                 # "type": "ui_qml", "view": "Main.qml"
+└── flake.nix                     # mkLogosQmlModule
+```
+
+QML + C++ backend app:
 ```
 my_app/
 ├── src/
-│   ├── MyAppPlugin.h/cpp         # IComponent implementation
-│   ├── MyAppBackend.h/cpp        # QObject backend
-│   └── qml/Main.qml              # QML UI
-├── metadata.json                 # "type": "ui"
-├── CMakeLists.txt
-└── flake.nix
+│   ├── my_app.rep                # Qt Remote Objects interface
+│   ├── my_app_interface.h        # extends PluginInterface
+│   ├── my_app_plugin.h/cpp       # SimpleSource + ViewPluginBase
+│   └── qml/Main.qml              # QML frontend (logos.module() replica)
+├── metadata.json                 # "type": "ui_qml", "main": "my_app_plugin"
+├── CMakeLists.txt                # logos_module() with REP_FILE
+└── flake.nix                     # mkLogosQmlModule
 ```
 
 ## metadata.json Is the Source of Truth
@@ -965,8 +1016,8 @@ Always handle the case where a target module is not loaded. Always declare depen
 |-------|------|-------------|
 | `name` | string | Module identifier. Must match binary prefix: `my_module` -> `my_module_plugin.so` |
 | `version` | string | Semantic version (`"1.0.0"`) |
-| `type` | string | `"core"` for modules, `"ui"` for UI apps |
-| `main` | string | Plugin binary name without extension: `"my_module_plugin"` |
+| `type` | string | `"core"` for modules, `"ui_qml"` for UI apps |
+| `main` | string | Plugin binary name without extension: `"my_module_plugin"` (optional for pure QML UI apps) |
 
 ## Universal Module Fields
 
@@ -1034,13 +1085,21 @@ These values are passed to CMake by the `logos_module()` macro. They supplement,
 
 ```json
 {
-  "type": "ui",
+  "type": "ui_qml",
+  "view": "Main.qml",
   "icon": "icon.png",
   "category": "tools"
 }
 ```
 
-UI apps do not use `"interface": "universal"` — they are hand-written Qt plugins with `IComponent`.
+| Field | Type | Description |
+|-------|------|-------------|
+| `view` | string | **Required** for `ui_qml`. Path to QML entry point (e.g., `"Main.qml"` or `"qml/Main.qml"`) |
+| `main` | string | **Optional**. If present, indicates a C++ backend plugin (e.g., `"my_app_plugin"`). If absent, the app is pure QML |
+
+Pure QML apps have no `"main"` field — no C++ compilation occurs. QML + backend apps have both `"main"` (C++ plugin) and `"view"` (QML entry point).
+
+UI apps do not use `"interface": "universal"` — they use `mkLogosQmlModule` in their flake.nix.
 
 
 ---
@@ -1138,6 +1197,44 @@ ws develop my-module               # Enter dev shell
 - Use `-L` flag to stream build logs: `nix build -L`
 - Use `--override-input` to test with local dependency changes (the `ws` CLI does this for you with `--auto-local`).
 
+## Flake Structure for UI QML Apps
+
+Pure QML (no C++ backend):
+
+```nix
+{
+  inputs.logos-module-builder.url = "github:logos-co/logos-module-builder";
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosQmlModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
+}
+```
+
+QML + C++ backend:
+
+```nix
+{
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    # Add module dependencies as inputs:
+    # some_module.url = "github:logos-co/logos-some-module";
+  };
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosQmlModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
+}
+```
+
+Both use `mkLogosQmlModule` (not `mkLogosModule`). No `preConfigure` needed — the `.rep` file (if present) is handled automatically via `REP_FILE` in CMakeLists.txt.
+
 ## Dev Shell for CMake Iteration
 
 ```bash
@@ -1152,64 +1249,137 @@ The dev shell provides all build dependencies. Use this for rapid C++ iteration 
 
 # Testing Logos Modules
 
-## Two Testing Approaches
+## Unit Tests with logos-test-framework
 
-### 1. Unit Tests (Universal Modules)
+Universal modules have a plain C++ impl class. Test it using the logos-test-framework, which is provided automatically by `logos-module-builder`.
 
-Universal modules have a plain C++ impl class with no framework dependencies. Test it directly:
+### Test File Structure
 
-```cpp
-#include "my_module_impl.h"
-#include <cassert>
-
-int main() {
-    MyModuleImpl impl;
-    assert(impl.hash("hello") == "expected_hash");
-    assert(impl.verify("hello", "expected_hash") == true);
-    return 0;
-}
+```
+tests/
+├── main.cpp              # LOGOS_TEST_MAIN() entry point
+├── test_my_module.cpp    # Test cases using LOGOS_TEST()
+└── CMakeLists.txt        # logos_test() macro
 ```
 
-For the SDK test framework, use `LOGOS_TEST_MAIN()`:
+### Writing Tests
 
 ```cpp
-#include "my_module_impl.h"
-#include "logos_test.h"
-
+// tests/main.cpp
+#include <logos_test.h>
 LOGOS_TEST_MAIN()
+```
 
-TEST(MyModule, HashWorks) {
+```cpp
+// tests/test_my_module.cpp
+#include <logos_test.h>
+#include "../src/my_module_impl.h"
+
+LOGOS_TEST(hash_returns_nonempty_string) {
     MyModuleImpl impl;
-    EXPECT_FALSE(impl.hash("hello").empty());
+    LOGOS_ASSERT_FALSE(impl.hash("hello").empty());
+}
+
+LOGOS_TEST(verify_matches_hash) {
+    MyModuleImpl impl;
+    auto hash = impl.hash("hello");
+    LOGOS_ASSERT_TRUE(impl.verify("hello", hash));
 }
 ```
 
-Add unit tests to the flake by including a `checks` output or a `tests/` directory with its own `CMakeLists.txt`.
+### CMakeLists.txt for Tests
 
-### 2. Integration Tests with logoscore
+```cmake
+# tests/CMakeLists.txt
+cmake_minimum_required(VERSION 3.14)
+project(MyModuleTests LANGUAGES CXX)
+
+include(LogosTest)
+
+logos_test(
+    NAME my_module_tests
+    MODULE_SOURCES ../src/my_module_impl.cpp
+    TEST_SOURCES
+        main.cpp
+        test_my_module.cpp
+)
+```
+
+The `logos_test()` CMake macro handles all framework wiring: Qt dependencies, SDK mock headers, include paths, and CTest registration.
+
+### Mocking Other Modules
+
+Use `LogosTestContext` when your module calls other modules:
+
+```cpp
+LOGOS_TEST(calls_waku_publish) {
+    auto t = LogosTestContext("chat_module");
+    t.mockModule("waku_module", "relayPublish").returns(true);
+
+    ChatImpl impl;
+    t.init(&impl);
+
+    impl.sendMessage("hello");
+    LOGOS_ASSERT(t.moduleCalled("waku_module", "relayPublish"));
+}
+```
+
+### Mocking C Libraries
+
+For modules wrapping external C/C++ libraries, write mock stubs:
+
+```cpp
+// tests/mocks/mock_libcalc.cpp
+#include <logos_clib_mock.h>
+extern "C" { #include "libcalc.h" }
+
+extern "C" int calc_add(int a, int b) {
+    LOGOS_CMOCK_RECORD("calc_add");
+    return LOGOS_CMOCK_RETURN(int, "calc_add");
+}
+```
+
+Reference them in CMake:
+
+```cmake
+logos_test(
+    NAME calc_module_tests
+    MODULE_SOURCES ../src/calc_module_impl.cpp
+    TEST_SOURCES main.cpp test_calc.cpp
+    MOCK_C_SOURCES mocks/mock_libcalc.cpp
+)
+```
+
+### Running Unit Tests
+
+```bash
+nix build .#unit-tests -L   # Build and run unit tests
+nix flake check -L           # All Nix checks including tests
+```
+
+`logos-module-builder` auto-detects `tests/CMakeLists.txt` and adds `checks.<system>.unit-tests` and `packages.<system>.unit-tests` automatically.
+
+## Integration Tests with logoscore
 
 Test the module as a loaded plugin via the headless runtime:
 
 ```bash
-# Load module and call a method
 logoscore -m ./result/lib -l my_module \
   -c "my_module.doSomething(test_input)"
 
-# Multiple sequential calls
 logoscore -m ./result/lib -l my_module \
   -c "my_module.init(config)" \
   -c "my_module.process(data)"
 
-# Load multiple modules (deps resolved automatically)
 logoscore -m ./result/lib -l my_module,other_module \
   -c "my_module.callOther(hello)"
 ```
 
 logoscore arguments:
-- `-m <path>` — Directory to scan for module plugins (repeatable)
-- `-l <mod1,mod2>` — Comma-separated modules to load
-- `-c "<module>.<method>(args)"` — Call a method (repeatable, sequential)
-- `--quit-on-finish` — Exit after calls complete (for CI)
+- `-m <path>` -- Directory to scan for module plugins (repeatable)
+- `-l <mod1,mod2>` -- Comma-separated modules to load
+- `-c "<module>.<method>(args)"` -- Call a method (repeatable, sequential)
+- `--quit-on-finish` -- Exit after calls complete (for CI)
 
 Type auto-detection in `-c` args: `true`/`false` -> bool, `42` -> int, `3.14` -> double, else -> string. Use `@filename` to load file content as an argument.
 
@@ -1226,18 +1396,77 @@ TEST_GROUPS=basic,ipc,errors ws test logos-test-modules --auto-local
 ### Running Tests via Nix
 
 ```bash
-# Run all checks defined in the flake
-nix flake check -L
+nix build .#unit-tests -L         # Run unit tests
+nix flake check -L                # Run all checks defined in the flake
 
-# In the workspace
-ws test my-module
-ws test my-module --auto-local     # with local dep overrides
-ws test --all --type cpp           # all C++ repos
+ws test my-module                 # In the workspace
+ws test my-module --auto-local    # With local dep overrides
+ws test --all --type cpp          # All C++ repos
 ```
+
+## 3. UI Integration Tests (QML Inspector)
+
+UI apps (`type: "ui_qml"`) can be tested via the QML Inspector MCP server built into `logos-standalone-app`. Tests interact with the live UI — clicking buttons, reading text, taking screenshots.
+
+### Test file pattern
+
+```javascript
+// tests/smoke.mjs
+const { resolve } = await import("node:path");
+const { test, run } = await import(
+  resolve(process.env.LOGOS_QT_MCP || "./result-mcp", "test-framework/framework.mjs")
+);
+
+test("my_app: basic interaction", async (app) => {
+  await app.expectTexts(["My App"]);
+  await app.click("Add");
+  await app.expectTexts(["Result:"]);
+});
+
+run();
+```
+
+### Test API
+
+| Method | Description |
+|--------|-------------|
+| `app.click(text, opts?)` | Find element by text and click it |
+| `app.expectTexts(texts)` | Assert all texts are visible |
+| `app.waitFor(fn, opts)` | Poll until fn succeeds (timeout, interval, description) |
+| `app.screenshot()` | Capture current state |
+| `app.findByType(type)` | Find elements by QML type |
+| `app.findByProperty(prop, value)` | Find elements by property |
+| `app.getTree()` | Get full QML element tree |
+
+### Running UI tests
+
+```bash
+# Interactive (app already running on localhost:3768)
+node tests/smoke.mjs
+
+# CI mode (launches app headless, tests, exits)
+node tests/smoke.mjs --ci ./result/bin/logos-standalone-app --verbose
+
+# Hermetic via Nix (offscreen, no display needed)
+nix build .#integration-test
+```
+
+Modules with `.mjs` test files in `tests/` automatically get `nix build .#integration-test` via `mkPluginTest`.
+
+### MCP tools for AI agents
+
+When the app is running, the `.mcp.json` auto-registers these tools with Claude Code / Cursor:
+
+`qml_screenshot`, `qml_find_and_click`, `qml_find_by_type`, `qml_find_by_property`, `qml_list_interactive`, `qml_get_tree`
+
+This lets AI agents visually verify UI changes, click through workflows, and debug layout issues in real time.
 
 ## Key Testing Rules
 
-- Unit tests should NOT require logoscore — instantiate the impl class directly
+- Unit tests use `LOGOS_TEST()` and `LOGOS_ASSERT_*` macros from `<logos_test.h>`
+- Unit tests should NOT require logoscore -- instantiate the impl class directly
+- `tests/CMakeLists.txt` must use `include(LogosTest)` + `logos_test()`
+- Use `LogosTestContext` for mocking module calls and C library functions
 - Integration tests verify the full plugin lifecycle (load, call, response)
 - Always test with `--quit-on-finish` in CI to ensure the process exits
 - 30-second timeout per `-c` call; exit code 1 on failure
@@ -1248,119 +1477,342 @@ ws test --all --type cpp           # all C++ repos
 
 # UI App Development
 
-## IComponent Pattern
+UI apps use `"type": "ui_qml"` in metadata.json. There are two subtypes:
 
-UI Apps are Qt plugins loaded directly by Basecamp. They implement `IComponent`:
+1. **Pure QML** — no C++ compilation, QML files only, calls backend modules via `logos.callModule()`
+2. **QML + C++ Backend** — process-isolated C++ backend (Qt Remote Objects), QML frontend runs in-process
 
-```cpp
-class IComponent {
-public:
-    virtual ~IComponent() = default;
-    virtual QWidget* createWidget(LogosAPI* logosAPI = nullptr) = 0;
-    virtual void destroyWidget(QWidget* widget) = 0;
-};
-```
+## Pure QML Apps
 
-The plugin class inherits both `QObject` and `IComponent`, and uses `Q_PLUGIN_METADATA`:
+Simplest UI app type. No compilation, no C++ code. The host loads QML directly.
 
-```cpp
-class MyPlugin : public QObject, public IComponent {
-    Q_OBJECT
-    Q_INTERFACES(IComponent)
-    Q_PLUGIN_METADATA(IID IComponent_iid FILE "metadata.json")
-public:
-    QWidget* createWidget(LogosAPI* logosAPI = nullptr) override;
-    void destroyWidget(QWidget* widget) override;
-};
-```
-
-## C++/QML Boundary Rules
-
-This is the most important convention for UI apps. Every piece of logic must go in the right layer:
-
-| Concern | C++ (backend class) | QML |
-|---------|---------------------|-----|
-| Data models, state | `Q_PROPERTY` on `QObject` | Bind to `backend.property` |
-| Business logic | Methods on backend class | Never — no JS business logic |
-| Module calls | `LogosAPI::callModule()` | `logos.callModule()` (thin wrapper) |
-| File I/O, networking | Always C++ | Never |
-| UI layout, styling | Never | Always use `Logos.Theme`, `Logos.Controls` |
-| User interactions | `Q_INVOKABLE` slots | `onClicked: backend.doThing()` |
-| Plugin lifecycle | `IComponent::createWidget/destroyWidget` | N/A |
-
-## Backend Class Pattern
-
-The backend is a `QObject` subclass exposed to QML as a context property:
-
-```cpp
-class MyBackend : public QObject {
-    Q_OBJECT
-    Q_PROPERTY(QVariantList items READ items NOTIFY itemsChanged)
-public:
-    explicit MyBackend(LogosAPI* api, QObject* parent = nullptr);
-    QVariantList items() const;
-
-    Q_INVOKABLE void addItem(const QString& name);
-    Q_INVOKABLE void removeItem(int index);
-
-signals:
-    void itemsChanged();
-
-private:
-    LogosAPI* m_api;
-    QVariantList m_items;
-};
-```
-
-In `createWidget()`, set the backend as a context property on the QML engine:
-
-```cpp
-QWidget* MyPlugin::createWidget(LogosAPI* logosAPI) {
-    auto* widget = new QQuickWidget;
-    auto* backend = new MyBackend(logosAPI, widget);
-    widget->rootContext()->setContextProperty("backend", backend);
-    widget->setSource(QUrl("qrc:/qml/Main.qml"));
-    return widget;
-}
-```
-
-## QML Conventions
-
-- Entry point is always `Main.qml`
-- Use `Logos.Theme` for all colors: `Logos.Theme.backgroundColor`, `Logos.Theme.textColor`
-- Use `Logos.Controls` for interactive elements: `LogosButton`, `LogosText`
-- Never hardcode colors — always use theme properties
-- Access the backend via the `backend` context property
-- Use declarative bindings over imperative JavaScript
-- Root element should use `anchors.fill: parent`
-
-## Calling Logos Modules
-
-From C++ backend:
-```cpp
-QVariant result = m_api->callModule("storage", "save", {key, value});
-```
-
-From QML (via LogosQmlBridge):
-```qml
-logos.callModule("storage", "save", [key, value])
-```
-
-Always declare module dependencies in `metadata.json` so they are loaded before the UI app.
-
-## metadata.json for UI Apps
+### metadata.json
 
 ```json
 {
   "name": "my_app",
-  "type": "ui",
+  "type": "ui_qml",
   "version": "1.0.0",
-  "description": "My UI application",
-  "icon": "icon.png",
+  "description": "My QML UI application",
+  "view": "Main.qml",
+  "icon": null,
   "category": "tools",
-  "dependencies": ["storage_module"]
+  "dependencies": ["some_backend_module"]
 }
 ```
+
+Key fields: `"type": "ui_qml"` and `"view"` pointing to the QML entry point. No `"main"` field.
+
+### QML Pattern
+
+```qml
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+
+Item {
+    id: root
+
+    function callBackend(method, args) {
+        if (typeof logos === "undefined" || !logos.callModule) {
+            console.log("Logos bridge not available")
+            return
+        }
+        return logos.callModule("some_backend_module", method, args)
+    }
+
+    Button {
+        text: "Do Something"
+        onClicked: {
+            var result = callBackend("myMethod", ["arg1", "arg2"])
+            console.log("Result:", result)
+        }
+    }
+}
+```
+
+The `logos` bridge is injected by the host (Basecamp or standalone runner). Use `logos.callModule(moduleName, method, args)` to call backend modules.
+
+### flake.nix
+
+Add backend module dependencies (from `metadata.json` `"dependencies"`) as flake inputs. The input attribute name must match the dependency name.
+
+```nix
+{
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+
+    # Each metadata.json dependency needs a matching flake input.
+    # Use path: for local development, github: for CI/published modules:
+    some_backend_module.url = "path:../logos-some-backend-module";
+    # some_backend_module.url = "github:logos-co/logos-some-backend-module";
+  };
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosQmlModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
+}
+```
+
+Uses `mkLogosQmlModule` (not `mkLogosModule`). No `preConfigure` needed.
+
+### Resolving Module Dependencies
+
+Each backend module must be built with its shared library (`.so`/`.dylib`) present in `lib/`. Three ways to point at a dependency:
+
+| Approach | `flake.nix` input URL | Build command |
+|----------|----------------------|---------------|
+| Local path in flake.nix | `path:../logos-my-module` | `nix run .` |
+| Remote URL + local override | `github:org/repo` | `nix run . --override-input dep_name path:../logos-my-module` |
+| Fully remote | `github:org/repo` | `nix run .` |
+
+`--override-input` overrides a flake input at build time without editing `flake.nix` — useful for quick iteration.
+
+## QML + C++ Backend Apps
+
+For apps that need business logic, state management, or access to system APIs. The C++ backend runs in a **separate isolated process** (`logos_host`), communicating with the QML frontend via Qt Remote Objects IPC.
+
+### metadata.json
+
+```json
+{
+  "name": "my_app",
+  "type": "ui_qml",
+  "version": "1.0.0",
+  "description": "My UI app with C++ backend",
+  "main": "my_app_plugin",
+  "view": "qml/Main.qml",
+  "icon": null,
+  "category": "tools",
+  "dependencies": []
+}
+```
+
+Key difference from pure QML: has `"main"` field pointing to the C++ plugin binary, and `"view"` points to `qml/Main.qml` (inside `src/`).
+
+### .rep File (Qt Remote Objects Interface)
+
+```
+class MyApp
+{
+    PROP(QString status READWRITE)
+    SLOT(int doSomething(int a, int b))
+}
+```
+
+Defines the IPC interface. Properties auto-sync to QML replicas. Slots are callable from QML.
+
+### C++ Plugin Class
+
+The plugin inherits three bases:
+- `MyAppSimpleSource` — generated from .rep, provides property storage + slot declarations
+- `MyAppInterface` — extends `PluginInterface`, used for Qt plugin loading
+- `MyAppViewPluginBase` — provides `setBackend()` to wire up Qt Remote Objects
+
+```cpp
+class MyAppPlugin : public MyAppSimpleSource,
+                    public MyAppInterface,
+                    public MyAppViewPluginBase
+{
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID MyAppInterface_iid FILE "metadata.json")
+    Q_INTERFACES(MyAppInterface)
+
+public:
+    explicit MyAppPlugin(QObject* parent = nullptr);
+
+    QString name()    const override { return "my_app"; }
+    QString version() const override { return "1.0.0"; }
+
+    Q_INVOKABLE void initLogos(LogosAPI* api);
+
+    // Implement slots from .rep
+    int doSomething(int a, int b) override;
+
+private:
+    LogosAPI* m_logosAPI = nullptr;
+};
+```
+
+In `initLogos()`, call `setBackend(this)` to wire up the Qt Remote Objects source:
+
+```cpp
+void MyAppPlugin::initLogos(LogosAPI* api) {
+    m_logosAPI = api;
+    setBackend(this);
+}
+```
+
+### CMakeLists.txt
+
+```cmake
+cmake_minimum_required(VERSION 3.14)
+project(MyAppPlugin LANGUAGES CXX)
+
+if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
+    include($ENV{LOGOS_MODULE_BUILDER_ROOT}/cmake/LogosModule.cmake)
+else()
+    message(FATAL_ERROR "LogosModule.cmake not found. Set LOGOS_MODULE_BUILDER_ROOT.")
+endif()
+
+logos_module(
+    NAME my_app
+    REP_FILE src/my_app.rep
+    SOURCES
+        src/my_app_interface.h
+        src/my_app_plugin.h
+        src/my_app_plugin.cpp
+)
+```
+
+Key: `REP_FILE` tells the build system to generate Qt Remote Objects source/replica headers from the `.rep` file.
+
+### QML Frontend
+
+```qml
+import QtQuick
+import QtQuick.Controls
+
+Item {
+    id: root
+
+    // Typed replica — auto-synced properties and callable slots
+    readonly property var backend: logos.module("my_app")
+    readonly property bool ready: backend !== null && logos.isViewModuleReady("my_app")
+
+    // Auto-synced property from .rep
+    readonly property string status: backend ? backend.status : ""
+
+    Button {
+        text: "Do Something"
+        enabled: root.ready
+        onClicked: {
+            logos.watch(backend.doSomething(1, 2),
+                function(value) { console.log("Result:", value) },
+                function(error) { console.log("Error:", error) }
+            )
+        }
+    }
+
+    Text {
+        text: "Status: " + root.status
+    }
+}
+```
+
+Key QML APIs:
+- `logos.module("name")` — returns a typed Qt Remote Objects replica
+- `logos.isViewModuleReady("name")` — checks if the backend process is connected
+- `logos.watch(pendingReply, onSuccess, onError)` — handles async slot calls
+
+## C++/QML Boundary Rules
+
+| Concern              | C++ (backend plugin)                     | QML                                    |
+| -------------------- | ---------------------------------------- | -------------------------------------- |
+| Data models, state   | `PROP()` in `.rep` file                  | Bind to `backend.property`             |
+| Business logic       | Implement as `SLOT()` in `.rep`          | Never — no JS business logic           |
+| Module calls         | Via `LogosAPI*` in `initLogos()`         | Via `logos.callModule()` (pure QML)    |
+| File I/O, networking | Always C++                               | Never                                  |
+| UI layout, styling   | Never                                    | QML; use `Logos.Theme` inside Basecamp |
+| User interactions    | `SLOT()` methods                         | `onClicked: logos.watch(backend.doX())`|
+| Plugin lifecycle     | `initLogos()` + `setBackend(this)`       | N/A                                    |
+
+## Build and Test
+
+```bash
+git init && git add -A   # nix needs files tracked
+nix build                # compiles (backend) or packages (pure QML)
+nix run .                # standalone app
+
+# Override a module dependency at build time (no flake.nix edits needed):
+nix run . --override-input some_module path:../logos-some-module
+```
+
+## Calling Logos Modules
+
+From C++ backend (in `initLogos` or slot implementations):
+
+```cpp
+auto* client = m_logosAPI->getClient("storage_module");
+QVariant result = client->invokeRemoteMethod("storage_module", "save", key, value);
+```
+
+From pure QML:
+
+```qml
+var result = logos.callModule("storage_module", "save", [key, value])
+```
+
+Always declare module dependencies in `metadata.json` `"dependencies"` so they are loaded before the UI app.
+
+## UI Integration Testing (QML Inspector + MCP)
+
+`logos-standalone-app` includes a QML Inspector MCP server that lets AI agents and test scripts interact with the running UI — take screenshots, click elements, inspect the QML tree.
+
+### Available MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `qml_screenshot` | Capture a screenshot of the current app state |
+| `qml_find_and_click` | Find a UI element by text and click it |
+| `qml_find_by_type` | Locate elements by QML type name |
+| `qml_find_by_property` | Locate elements by property value |
+| `qml_list_interactive` | List all clickable/interactive elements |
+| `qml_get_tree` | Get the full QML element tree |
+
+### Interactive testing (AI agent workflow)
+
+```bash
+nix build && nix run .     # launches app with inspector on localhost:3768
+```
+
+The `.mcp.json` in the project directory auto-registers the MCP server with Claude Code and other MCP clients. The AI agent can then screenshot, click buttons, and verify UI state in real time.
+
+### Writing integration test files
+
+```javascript
+// tests/smoke.mjs
+const { test, run } = await import(
+  resolve(process.env.LOGOS_QT_MCP || "./result-mcp", "test-framework/framework.mjs")
+);
+
+test("my_app: click add and verify result", async (app) => {
+  await app.click("Add");
+  await app.expectTexts(["Result:"]);
+});
+
+run();
+```
+
+### Running tests
+
+```bash
+# Interactive (app already running)
+node tests/smoke.mjs
+
+# CI mode (launches app headless, tests, exits)
+node tests/smoke.mjs --ci ./result/bin/logos-standalone-app --verbose
+
+# Hermetic via Nix (headless, offscreen)
+nix build .#integration-test
+```
+
+### Nix `mkPluginTest` builder
+
+UI modules with `.mjs` test files in `tests/` automatically get `nix build .#integration-test`. For manual setup:
+
+```nix
+integration-test = logos-standalone-app.lib.${system}.mkPluginTest {
+  inherit pkgs;
+  pluginPkg = myModulePackage;
+  testFiles = [ ./tests/smoke.mjs ];
+  name = "my-module-integration-test";
+};
+```
+
+The builder runs headless (`QT_QPA_PLATFORM=offscreen`), connects to the QML inspector, and executes each test file sequentially.
 
 
 ---
