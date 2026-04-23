@@ -741,7 +741,7 @@ function createFullApp(
 
   outputs = inputs@{ logos-module-builder, ... }:
     let
-      base = logos-module-builder.lib.mkLogosModule {
+      base = logos-module-builder.lib.mkLogosQmlModule {
         src = ./.;
         configFile = ./metadata.json;
         flakeInputs = inputs;

@@ -65,8 +65,8 @@ run_one() {
   echo "  scaffolded: $proj"
 
   if [ "$type" = "full-app" ]; then
-    local module_subdir="${name//_/-}-module"
-    local ui_subdir="${name//_/-}-ui"
+    local module_subdir="${name}-module"
+    local ui_subdir="${name}-ui"
 
     # Verify sub-project directories were created
     if [ ! -d "$proj/$module_subdir" ]; then
@@ -88,12 +88,17 @@ run_one() {
       *)      ext="so"    ;;
     esac
 
-    # Build module sub-project (needs its own git repo since it's a standalone flake)
+    # Init a parent git repo so the UI flake's path:../<module> input resolves.
+    (
+      cd "$proj"
+      git init -q
+      git add -A
+    )
+
+    # Build module sub-project
     echo "  building $module_subdir sub-project..."
     (
       cd "$proj/$module_subdir"
-      git init -q
-      git add -A
       nix build -L
     )
     local module_plugin="$proj/$module_subdir/result/lib/${name}_plugin.$ext"
@@ -105,12 +110,10 @@ run_one() {
     fi
     echo "  OK: module ${name}_plugin.$ext built"
 
-    # Build UI sub-project (needs module to be git-tracked for path: input)
+    # Build UI sub-project (needs module tracked by parent git for path: input)
     echo "  building $ui_subdir sub-project..."
     (
       cd "$proj/$ui_subdir"
-      git init -q
-      git add -A
       nix build -L
     )
     local ui_plugin="$proj/$ui_subdir/result/lib/${name}_ui_plugin.$ext"
