@@ -3,10 +3,15 @@ import * as path from "node:path";
 
 interface ProjectInfo {
   name: string;
-  type: "module" | "ui-qml" | "ui-qml-backend" | "unknown";
+  type: "module" | "ui-qml" | "ui-qml-backend" | "full-app" | "unknown";
   interface: "universal" | "legacy" | "none";
   description: string;
   dependencies: string[];
+  // full-app only
+  moduleName?: string;
+  uiName?: string;
+  moduleDir?: string;   // relative path e.g. "tictactoe-module"
+  uiDir?: string;       // relative path e.g. "tictactoe-ui"
 }
 
 function detectProject(projectDir: string): ProjectInfo {
@@ -17,6 +22,40 @@ function detectProject(projectDir: string): ProjectInfo {
     description: "",
     dependencies: [],
   };
+
+  // Check for full-app root (project.json with type: "full-app")
+  const projectJsonPath = path.join(projectDir, "project.json");
+  if (fs.existsSync(projectJsonPath)) {
+    const proj = JSON.parse(fs.readFileSync(projectJsonPath, "utf-8"));
+    if (proj.type === "full-app") {
+      info.name = proj.name || "unknown";
+      info.type = "full-app";
+      info.description = proj.description || "";
+      info.moduleName = proj.name;
+      info.uiName = `${proj.name}_ui`;
+      info.moduleDir = proj.module || `${proj.name}-module`;
+      info.uiDir = proj.ui || `${proj.name}-ui`;
+      return info;
+    }
+  }
+
+  // Fallback: scan for <name>-module / <name>-ui sibling directories
+  const entries = fs.existsSync(projectDir) ? fs.readdirSync(projectDir) : [];
+  const moduleEntry = entries.find((e: string) => e.endsWith("-module") &&
+    fs.existsSync(path.join(projectDir, e, "metadata.json")));
+  const uiEntry = entries.find((e: string) => e.endsWith("-ui") &&
+    fs.existsSync(path.join(projectDir, e, "metadata.json")));
+  if (moduleEntry && uiEntry) {
+    const moduleMeta = JSON.parse(fs.readFileSync(path.join(projectDir, moduleEntry, "metadata.json"), "utf-8"));
+    info.name = moduleMeta.name || "unknown";
+    info.type = "full-app";
+    info.description = moduleMeta.description || "";
+    info.moduleName = moduleMeta.name;
+    info.uiName = `${moduleMeta.name}_ui`;
+    info.moduleDir = moduleEntry;
+    info.uiDir = uiEntry;
+    return info;
+  }
 
   const metadataPath = path.join(projectDir, "metadata.json");
   if (fs.existsSync(metadataPath)) {
@@ -68,19 +107,29 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   if (project.name !== "unknown") {
     lines.push("## This Project");
     lines.push("");
-    lines.push(`- **Name:** ${project.name}`);
-    const typeLabel = project.type === "ui-qml" ? "UI App (pure QML)"
-      : project.type === "ui-qml-backend" ? "UI App (QML + C++ backend)"
-      : "Logos Module (core)";
-    lines.push(`- **Type:** ${typeLabel}`);
-    if (project.interface === "universal") {
-      lines.push("- **Interface:** Universal (pure C++ impl, generated Qt glue)");
-    }
-    if (project.description) {
-      lines.push(`- **Description:** ${project.description}`);
-    }
-    if (project.dependencies.length > 0) {
-      lines.push(`- **Dependencies:** ${project.dependencies.join(", ")}`);
+    if (project.type === "full-app") {
+      lines.push(`- **Name:** ${project.name}`);
+      lines.push("- **Type:** Full App (module + UI app)");
+      lines.push(`- **Module:** \`${project.moduleDir}/\` — universal C++ module (\`${project.moduleName}\`)`);
+      lines.push(`- **UI App:** \`${project.uiDir}/\` — Basecamp UI plugin (\`${project.uiName}\`)`);
+      if (project.description) {
+        lines.push(`- **Description:** ${project.description}`);
+      }
+    } else {
+      lines.push(`- **Name:** ${project.name}`);
+      const typeLabel = project.type === "ui-qml" ? "UI App (pure QML)"
+        : project.type === "ui-qml-backend" ? "UI App (QML + C++ backend)"
+        : "Logos Module (core)";
+      lines.push(`- **Type:** ${typeLabel}`);
+      if (project.interface === "universal") {
+        lines.push("- **Interface:** Universal (pure C++ impl, generated Qt glue)");
+      }
+      if (project.description) {
+        lines.push(`- **Description:** ${project.description}`);
+      }
+      if (project.dependencies.length > 0) {
+        lines.push(`- **Dependencies:** ${project.dependencies.join(", ")}`);
+      }
     }
     lines.push("");
   }
@@ -100,10 +149,17 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("### Build Commands");
   lines.push("");
   lines.push("```bash");
-  lines.push("nix build                    # Build the module/app");
-  lines.push("nix build -L                 # Build with streaming logs");
-  lines.push("nix flake check -L           # Run tests");
-  lines.push("nix develop                  # Enter dev shell");
+  if (project.type === "full-app") {
+    lines.push(`nix build                        # Build both (default: UI app)`);
+    lines.push(`nix build -L                     # Build with streaming logs`);
+    lines.push(`cd ${project.moduleDir} && nix build   # Build module standalone`);
+    lines.push(`cd ${project.uiDir} && nix build       # Build UI app standalone`);
+  } else {
+    lines.push("nix build                    # Build the module/app");
+    lines.push("nix build -L                 # Build with streaming logs");
+    lines.push("nix flake check -L           # Run tests");
+    lines.push("nix develop                  # Enter dev shell");
+  }
   lines.push("```");
   lines.push("");
 
@@ -123,20 +179,28 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("### Testing");
   lines.push("");
   lines.push("```bash");
-  lines.push("# Integration test with logoscore");
-  if (project.name !== "unknown") {
-    lines.push(`logoscore -m ./result/lib -l ${project.name} -c "${project.name}.methodName(args)"`);
+  if (project.type === "full-app") {
+    lines.push(`# Test the module`);
+    lines.push(`logoscore -m ./${project.moduleDir}/result/lib -l ${project.moduleName} -c "${project.moduleName}.methodName(args)"`);
+    lines.push("");
+    lines.push("# Inspect module methods");
+    lines.push(`lm ./${project.moduleDir}/result/lib/${project.moduleName}_plugin.so`);
   } else {
-    lines.push('logoscore -m ./result/lib -l <module> -c "<module>.methodName(args)"');
-  }
-  lines.push("");
-  lines.push("# Inspect module metadata and methods");
-  if (project.name !== "unknown") {
-    lines.push(`lm ./result/lib/${project.name}_plugin.so`);
-    lines.push(`lm methods ./result/lib/${project.name}_plugin.so --json`);
-  } else {
-    lines.push("lm ./result/lib/<name>_plugin.so");
-    lines.push("lm methods ./result/lib/<name>_plugin.so --json");
+    lines.push("# Integration test with logoscore");
+    if (project.name !== "unknown") {
+      lines.push(`logoscore -m ./result/lib -l ${project.name} -c "${project.name}.methodName(args)"`);
+    } else {
+      lines.push('logoscore -m ./result/lib -l <module> -c "<module>.methodName(args)"');
+    }
+    lines.push("");
+    lines.push("# Inspect module metadata and methods");
+    if (project.name !== "unknown") {
+      lines.push(`lm ./result/lib/${project.name}_plugin.so`);
+      lines.push(`lm methods ./result/lib/${project.name}_plugin.so --json`);
+    } else {
+      lines.push("lm ./result/lib/<name>_plugin.so");
+      lines.push("lm methods ./result/lib/<name>_plugin.so --json");
+    }
   }
   lines.push("```");
   lines.push("");
@@ -144,7 +208,14 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("### Packaging");
   lines.push("");
   lines.push("```bash");
-  if (project.name !== "unknown") {
+  if (project.type === "full-app") {
+    lines.push(`lgx create ${project.moduleName}`);
+    lines.push(`lgx add ${project.moduleName}.lgx -v linux-x86_64 -f ./${project.moduleDir}/result/lib/${project.moduleName}_plugin.so`);
+    lines.push(`lgx verify ${project.moduleName}.lgx`);
+    lines.push(`lgx create ${project.uiName}`);
+    lines.push(`lgx add ${project.uiName}.lgx -v linux-x86_64 -f ./${project.uiDir}/result/lib/${project.uiName}_plugin.so`);
+    lines.push(`lgx verify ${project.uiName}.lgx`);
+  } else if (project.name !== "unknown") {
     lines.push(`lgx create ${project.name}`);
     lines.push(`lgx add ${project.name}.lgx -v linux-x86_64 -f ./result/lib/${project.name}_plugin.so`);
     lines.push(`lgx verify ${project.name}.lgx`);
@@ -157,7 +228,7 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("");
 
   lines.push("### For detailed documentation, see the logos-dev-boost docs/ directory");
-  lines.push("### or activate a skill: create-universal-module, wrap-external-lib,");
+  lines.push("### or activate a skill: create-full-app, create-universal-module, wrap-external-lib,");
   lines.push("### create-ui-app, package-lgx, inter-module-comm, testing-modules,");
   lines.push("### nix-flake-setup, add-to-workspace");
   lines.push("");

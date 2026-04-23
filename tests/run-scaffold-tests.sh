@@ -9,7 +9,7 @@
 #   5. For modules: runs `nix build .#unit-tests -L` to verify generated tests compile and pass.
 #
 # Usage:
-#   tests/run-scaffold-tests.sh <type>          # one of: module, ui-qml, ui-qml-backend
+#   tests/run-scaffold-tests.sh <type>          # one of: module, ui-qml, ui-qml-backend, full-app
 #   tests/run-scaffold-tests.sh all             # runs all supported types
 #
 # Env:
@@ -30,8 +30,9 @@ run_one() {
     module)         name="scaffold_test_mod" ;;
     ui-qml)         name="scaffold_test_qml" ;;
     ui-qml-backend) name="scaffold_test_backend" ;;
+    full-app)       name="scaffold_test_full" ;;
     *)
-      echo "unknown type: $type (expected 'module', 'ui-qml', or 'ui-qml-backend')" >&2
+      echo "unknown type: $type (expected 'module', 'ui-qml', 'ui-qml-backend', or 'full-app')" >&2
       exit 2
       ;;
   esac
@@ -62,6 +63,67 @@ run_one() {
   fi
 
   echo "  scaffolded: $proj"
+
+  if [ "$type" = "full-app" ]; then
+    local module_subdir="${name//_/-}-module"
+    local ui_subdir="${name//_/-}-ui"
+
+    # Verify sub-project directories were created
+    if [ ! -d "$proj/$module_subdir" ]; then
+      echo "FAIL: full-app scaffold did not produce $proj/$module_subdir/" >&2
+      exit 1
+    fi
+    if [ ! -d "$proj/$ui_subdir" ]; then
+      echo "FAIL: full-app scaffold did not produce $proj/$ui_subdir/" >&2
+      exit 1
+    fi
+    if [ ! -f "$proj/project.json" ]; then
+      echo "FAIL: full-app scaffold did not produce $proj/project.json" >&2
+      exit 1
+    fi
+
+    local ext
+    case "$(uname -s)" in
+      Darwin) ext="dylib" ;;
+      *)      ext="so"    ;;
+    esac
+
+    # Build module sub-project (needs its own git repo since it's a standalone flake)
+    echo "  building $module_subdir sub-project..."
+    (
+      cd "$proj/$module_subdir"
+      git init -q
+      git add -A
+      nix build -L
+    )
+    local module_plugin="$proj/$module_subdir/result/lib/${name}_plugin.$ext"
+    if [ ! -f "$module_plugin" ]; then
+      echo "FAIL: expected $module_plugin, not found" >&2
+      echo "  $module_subdir/result contents:" >&2
+      ls -la "$proj/$module_subdir/result/lib/" >&2 || true
+      exit 1
+    fi
+    echo "  OK: module ${name}_plugin.$ext built"
+
+    # Build UI sub-project (needs module to be git-tracked for path: input)
+    echo "  building $ui_subdir sub-project..."
+    (
+      cd "$proj/$ui_subdir"
+      git init -q
+      git add -A
+      nix build -L
+    )
+    local ui_plugin="$proj/$ui_subdir/result/lib/${name}_ui_plugin.$ext"
+    if [ ! -f "$ui_plugin" ]; then
+      echo "FAIL: expected $ui_plugin, not found" >&2
+      echo "  $ui_subdir/result contents:" >&2
+      ls -la "$proj/$ui_subdir/result/lib/" >&2 || true
+      exit 1
+    fi
+    echo "  OK: ui ${name}_ui_plugin.$ext built"
+    return
+  fi
+
   echo "  building..."
   (
     cd "$proj"
@@ -108,7 +170,7 @@ run_one() {
 }
 
 if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <module|ui-qml|ui-qml-backend|all>" >&2
+  echo "usage: $0 <module|ui-qml|ui-qml-backend|full-app|all>" >&2
   exit 2
 fi
 
@@ -117,6 +179,7 @@ case "$1" in
     run_one module
     run_one ui-qml
     run_one ui-qml-backend
+    run_one full-app
     ;;
   *)
     run_one "$1"

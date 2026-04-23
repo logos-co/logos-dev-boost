@@ -31,6 +31,9 @@ interface ProjectInfo {
   nixInputs: Record<string, string>;
   cmakePackages: string[];
   externalLibraries: string[];
+  // full-app only
+  module?: ProjectInfo;
+  ui?: ProjectInfo;
 }
 
 export function handleProjectInfo(args: Record<string, unknown>) {
@@ -63,6 +66,45 @@ function inspectProject(dir: string): ProjectInfo {
     cmakePackages: [],
     externalLibraries: [],
   };
+
+  // Check for full-app root
+  const projectJsonPath = path.join(dir, "project.json");
+  if (fs.existsSync(projectJsonPath)) {
+    const proj = JSON.parse(fs.readFileSync(projectJsonPath, "utf-8"));
+    if (proj.type === "full-app") {
+      info.projectType = "full-app";
+      info.name = proj.name || "unknown";
+      info.description = proj.description || "";
+      info.hasFlake = false;  // no root flake.nix in full-app layout
+      info.buildTargets = [`${proj.module || `${proj.name}-module`}`, `${proj.ui || `${proj.name}-ui`}`];
+      const moduleDir = path.join(dir, proj.module || `${proj.name}-module`);
+      const uiDir = path.join(dir, proj.ui || `${proj.name}-ui`);
+      if (fs.existsSync(moduleDir)) {
+        info.module = inspectProject(moduleDir);
+      }
+      if (fs.existsSync(uiDir)) {
+        info.ui = inspectProject(uiDir);
+      }
+      return info;
+    }
+  }
+
+  // Fallback: scan for <name>-module / <name>-ui sibling directories
+  const entries = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const moduleEntry = entries.find((e: string) => e.endsWith("-module") &&
+    fs.existsSync(path.join(dir, e, "metadata.json")));
+  const uiEntry = entries.find((e: string) => e.endsWith("-ui") &&
+    fs.existsSync(path.join(dir, e, "metadata.json")));
+  if (moduleEntry && uiEntry) {
+    info.projectType = "full-app";
+    info.hasFlake = false;
+    info.buildTargets = [moduleEntry, uiEntry];
+    info.module = inspectProject(path.join(dir, moduleEntry));
+    info.ui = inspectProject(path.join(dir, uiEntry));
+    info.name = info.module.name;
+    info.description = info.module.description;
+    return info;
+  }
 
   const metadataPath = path.join(dir, "metadata.json");
   if (fs.existsSync(metadataPath)) {

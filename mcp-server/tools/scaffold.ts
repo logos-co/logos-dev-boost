@@ -15,8 +15,8 @@ export const scaffoldTool: Tool = {
       },
       type: {
         type: "string",
-        enum: ["module", "ui-qml", "ui-qml-backend"],
-        description: "Project type: 'module' for universal C++ module, 'ui-qml' for pure QML UI app, 'ui-qml-backend' for QML + C++ backend UI app",
+        enum: ["module", "ui-qml", "ui-qml-backend", "full-app"],
+        description: "Project type: 'module' for universal C++ module, 'ui-qml' for pure QML UI app, 'ui-qml-backend' for QML + C++ backend UI app, 'full-app' for both module + UI app together",
       },
       description: {
         type: "string",
@@ -42,7 +42,7 @@ function toPascalCase(name: string): string {
 export function handleScaffold(args: Record<string, unknown>) {
   const name = args.name as string;
   const type = args.type as string;
-  const description = (args.description as string) || `Logos ${type === "module" ? "module" : "UI app"}`;
+  const description = (args.description as string) || `Logos ${type === "module" ? "module" : type === "full-app" ? "module + UI app" : "UI app"}`;
   const externalLib = (args.externalLib as boolean) || false;
   const parentDir = (args.directory as string) || process.cwd();
 
@@ -80,6 +80,8 @@ export function handleScaffold(args: Record<string, unknown>) {
     createQmlApp(projectDir, name, description, filesCreated);
   } else if (type === "ui-qml-backend") {
     createQmlBackendApp(projectDir, name, description, filesCreated);
+  } else if (type === "full-app") {
+    createFullApp(projectDir, name, description, filesCreated);
   }
 
   const relFiles = filesCreated.map((f) => path.relative(parentDir, f));
@@ -92,17 +94,25 @@ export function handleScaffold(args: Record<string, unknown>) {
           {
             project_dir: projectDir,
             files_created: relFiles,
-            next_steps: [
-              `cd ${path.basename(projectDir)}`,
-              "git init && git add -A",
-              "nix build",
-              ...(type === "module"
-                ? [
-                    "nix build .#unit-tests -L",
-                    `logoscore -m ./result/lib -l ${name} -c "${name}.methodName(args)"`,
-                  ]
-                : [`nix run .`]),
-            ],
+            next_steps: type === "full-app"
+              ? [
+                  `cd ${path.basename(projectDir)}`,
+                  "git init && git add -A",
+                  `cd ${name}-module && git init && git add -A && nix build`,
+                  `cd ../${name}-ui && git init && git add -A && nix build`,
+                  `logoscore -m ./${name}-module/result/lib -l ${name} -c "${name}.echo(hello)"`,
+                ]
+              : [
+                  `cd ${path.basename(projectDir)}`,
+                  "git init && git add -A",
+                  "nix build",
+                  ...(type === "module"
+                    ? [
+                        "nix build .#unit-tests -L",
+                        `logoscore -m ./result/lib -l ${name} -c "${name}.methodName(args)"`,
+                      ]
+                    : [`nix run .`]),
+                ],
           },
           null,
           2
@@ -686,6 +696,91 @@ logos_module(
       flakeInputs = inputs;
     };
 }
+`,
+    filesCreated
+  );
+}
+
+function createFullApp(
+  dir: string,
+  name: string,
+  description: string,
+  filesCreated: string[]
+) {
+  const uiName = `${name}_ui`;
+  const moduleDir = path.join(dir, `${name}-module`);
+  const uiDir = path.join(dir, `${name}-ui`);
+
+  // Scaffold the module sub-project
+  createUniversalModule(moduleDir, name, description, false, filesCreated);
+
+  // Scaffold the UI sub-project (named <name>_ui)
+  createQmlBackendApp(uiDir, uiName, description, filesCreated);
+
+  // Patch ui/metadata.json to declare the module as a runtime dependency
+  const uiMetadataPath = path.join(uiDir, "metadata.json");
+  const uiMetadata = JSON.parse(fs.readFileSync(uiMetadataPath, "utf-8"));
+  uiMetadata.dependencies = [name];
+  fs.writeFileSync(uiMetadataPath, JSON.stringify(uiMetadata, null, 2) + "\n");
+
+  // Overwrite ui/flake.nix to add the module as a flake input so
+  // logos-module-builder can resolve the runtime dependency declaration.
+  const flakeEscDescription = description.replace(/"/g, '\\"').replace(/\r?\n/g, " ");
+  // Use fs.writeFileSync directly (not writeFile) to avoid a duplicate entry in
+  // filesCreated — createUiApp() already tracked this path.
+  fs.writeFileSync(
+    path.join(uiDir, "flake.nix"),
+    `{
+  description = "${flakeEscDescription}";
+
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
+    ${name}.url = "path:../${name}-module";
+  };
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    let
+      base = logos-module-builder.lib.mkLogosModule {
+        src = ./.;
+        configFile = ./metadata.json;
+        flakeInputs = inputs;
+      };
+    in
+    base // (
+      if base ? apps then {
+        apps = builtins.mapAttrs (_system: apps:
+          apps // { app = apps.default; }
+        ) base.apps;
+      } else {}
+    );
+}
+`
+  );
+
+  // Root project.json — metadata for AI context generators
+  writeFile(
+    path.join(dir, "project.json"),
+    JSON.stringify(
+      {
+        type: "full-app",
+        name,
+        description,
+        module: `${name}-module`,
+        ui: `${name}-ui`,
+      },
+      null,
+      2
+    ) + "\n",
+    filesCreated
+  );
+
+  // Root .gitignore
+  writeFile(
+    path.join(dir, ".gitignore"),
+    `.DS_Store
+result
+build/
 `,
     filesCreated
   );
