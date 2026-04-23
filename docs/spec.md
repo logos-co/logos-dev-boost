@@ -74,8 +74,10 @@ The code generator maps C++ standard types to LIDL types to Qt types:
 | `std::vector<uint8_t>` | `bstr` | `QByteArray` |
 | `std::vector<int64_t>` | `[int]` | `QVariantList` |
 | `std::vector<bool>` | `[bool]` | `QVariantList` |
+| `LogosMap` | `{tstr: any}` | `QVariantMap` |
+| `LogosList` | `[any]` | `QVariantList` |
 
-Module authors only work with the C++ column. The generator handles everything else.
+Module authors only work with the C++ column. The generator handles everything else. `LogosMap`/`LogosList` (from `<logos_json.h>`) are `nlohmann::json` aliases for returning rich structured data while keeping the impl Qt-free.
 
 ### How logos-dev-boost Layers Work Together
 

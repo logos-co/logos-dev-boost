@@ -45,7 +45,7 @@ logos-cpp-generator --from-header src/<name>_impl.h \
 ### Generated Files
 
 **`<name>_qt_glue.h`** — Contains two classes:
-1. **ProviderObject** — Inherits `LogosProviderBase`. Holds `m_impl` (your impl class). Each public method gets a typed wrapper that converts Qt params to C++ std params, calls `m_impl.method(...)`, and converts the return value back.
+1. **ProviderObject** — Inherits `LogosProviderBase`. Holds `m_impl` (your impl class). Each public method gets a typed wrapper that converts Qt params to C++ std params, calls `m_impl.method(...)`, and converts the return value back. For `LogosMap`/`LogosList` returns, an `nlohmannToQVariant()` helper handles the conversion. If the impl declares a public `emitEvent` callback, the constructor wires it to `LogosProviderBase::emitEvent`.
 2. **Plugin** — `QObject` subclass with `Q_PLUGIN_METADATA` and `Q_INTERFACES`. Factory method `createProviderObject()` returns a new ProviderObject.
 
 **`<name>_dispatch.cpp`** — Implements two methods on the ProviderObject:
@@ -65,7 +65,11 @@ logos-cpp-generator --from-header src/<name>_impl.h \
 | `std::vector<std::string>` | `[tstr]` | `QStringList` |
 | `std::vector<uint8_t>` | `bstr` | `QByteArray` |
 | `std::vector<int64_t>` | `[int]` | `QVariantList` |
+| `LogosMap` | `{tstr: any}` | `QVariantMap` |
+| `LogosList` | `[any]` | `QVariantList` |
 | Anything else | `any` | `QVariant` |
+
+`LogosMap` and `LogosList` (from `<logos_json.h>`) are `nlohmann::json` aliases for returning structured data without Qt. The generator sets a `jsonReturn` flag on these methods and emits an `nlohmannToQVariant()` conversion in the glue layer.
 
 ## LIDL (Alternative Input Format)
 

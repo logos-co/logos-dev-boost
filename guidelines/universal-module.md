@@ -32,8 +32,31 @@ Universal modules use **pure C++** for their implementation. You write a single 
 | `std::vector<int64_t>` | `[int]` | `QVariantList` |
 | `std::vector<double>` | `[float64]` | `QVariantList` |
 | `std::vector<bool>` | `[bool]` | `QVariantList` |
+| `LogosMap` | `{tstr: any}` | `QVariantMap` |
+| `LogosList` | `[any]` | `QVariantList` |
+
+`LogosMap` and `LogosList` (from `<logos_json.h>`) are aliases for `nlohmann::json`. Use them when you need to return structured objects or arrays while keeping your impl Qt-free. The generator automatically converts them to `QVariantMap`/`QVariantList` in the glue layer.
 
 If you use a type not in this table, the generator maps it to `any` (`QVariant`). Prefer explicit types from the table for type safety.
+
+## Emitting Events
+
+To emit events from your module, declare a public `emitEvent` callback in your impl header:
+
+```cpp
+#include <functional>
+std::function<void(const std::string& eventName, const std::string& data)> emitEvent;
+```
+
+The generator detects this automatically and wires it to the Logos event system. Call it from your implementation:
+
+```cpp
+if (emitEvent) {
+    emitEvent("somethingHappened", someData);
+}
+```
+
+No `events` array in `metadata.json` is needed — the generator infers everything from the header.
 
 ## Impl Header Template
 

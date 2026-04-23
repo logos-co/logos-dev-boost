@@ -228,7 +228,11 @@ The code generator maps between three type systems:
 | \`std::vector<int64_t>\` | \`[int]\` | \`QVariantList\` |
 | \`std::vector<double>\` | \`[float64]\` | \`QVariantList\` |
 | \`std::vector<bool>\` | \`[bool]\` | \`QVariantList\` |
+| \`LogosMap\` | \`{tstr: any}\` | \`QVariantMap\` |
+| \`LogosList\` | \`[any]\` | \`QVariantList\` |
 | Anything else | \`any\` | \`QVariant\` |
+
+\`LogosMap\` and \`LogosList\` (from \`<logos_json.h>\`) are \`nlohmann::json\` aliases for returning structured objects/arrays while keeping the impl Qt-free. The generator emits an \`nlohmannToQVariant()\` conversion in the glue layer.
 
 Module authors only use C++ types. The generator handles conversion.
 Prefer explicit types from the table for type safety; unknown types map to \`any\`.`,
