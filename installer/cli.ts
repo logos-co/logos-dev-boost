@@ -8,7 +8,7 @@ function printUsage() {
   console.log(`logos-dev-boost — AI-assisted development accelerator for Logos
 
 Usage:
-  logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend|full-app> [--external-lib]
+  logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend|full-app> [--external-lib] [--lib-dir <path>]
   logos-dev-boost install
   logos-dev-boost generate [--agents-md] [--claude-md] [--cursor-rules] [--llms-txt]
   logos-dev-boost --help
@@ -24,6 +24,7 @@ Options:
   --type ui-qml-backend   QML + process-isolated C++ backend UI app
   --type full-app         Both module + UI app as sibling subdirectories (recommended for most projects)
   --external-lib          Include external library wrapping scaffold (modules only)
+  --lib-dir <path>        Path to directory with C library files (.h + .c/.so); implies --external-lib
   --help              Show this help message
 `);
 }
@@ -46,7 +47,9 @@ async function main() {
 
       const typeIdx = args.indexOf("--type");
       const type = typeIdx >= 0 ? args[typeIdx + 1] : "module";
-      const externalLib = args.includes("--external-lib");
+      const libDirIdx = args.indexOf("--lib-dir");
+      const libDir = libDirIdx >= 0 ? path.resolve(args[libDirIdx + 1]) : null;
+      const externalLib = args.includes("--external-lib") || !!libDir;
 
       if (!["module", "ui-qml", "ui-qml-backend", "full-app"].includes(type)) {
         console.error("Error: --type must be 'module', 'ui-qml', 'ui-qml-backend', or 'full-app'");
@@ -62,6 +65,7 @@ async function main() {
         name,
         type,
         externalLib,
+        libDir,
         directory: process.cwd(),
       });
 
