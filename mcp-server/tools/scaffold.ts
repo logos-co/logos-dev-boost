@@ -937,12 +937,20 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    // Typed replica — auto-synced properties and callable slots.
     readonly property var backend: logos.module("${name}")
-    readonly property bool ready: backend !== null && logos.isViewModuleReady("${name}")
-
-    // "status" property from the .rep file, auto-updated via QTRO.
+    property bool ready: false
     readonly property string status: backend ? backend.status : ""
+
+    Connections {
+        target: logos
+        function onViewModuleReadyChanged(moduleName, isReady) {
+            if (moduleName === "${name}")
+                root.ready = isReady && root.backend !== null;
+        }
+    }
+    Component.onCompleted: {
+        root.ready = root.backend !== null && logos.isViewModuleReady("${name}");
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -956,7 +964,6 @@ Item {
             Layout.alignment: Qt.AlignHCenter
         }
 
-        // Connection status
         Text {
             text: root.ready ? "Connected" : "Connecting to backend..."
             color: root.ready ? "#56d364" : "#f0883e"
@@ -1201,29 +1208,57 @@ ${slotImpls}
 `
   );
 
-  // Overwrite QML to show the first method as example
-  const firstMethod = methods.filter((m) => m.cppReturnType !== "void")[0];
-  if (!firstMethod) return;
+  // Overwrite QML with a per-method UI — one GroupBox per non-void method
+  const uiMethods = methods.filter((m) => m.cppReturnType !== "void").slice(0, 8);
+  if (uiMethods.length === 0) return;
 
-  const hasIntParams = firstMethod.params.some((p) => p.cppType === "int" || p.cppType === "int64_t" || p.cppType === "uint64_t" || p.cppType === "double");
-  const hasStringParams = firstMethod.params.some((p) => p.cppType.includes("string"));
+  const methodGroups = uiMethods.map((m, mi) => {
+    const fieldIds: string[] = [];
+    const inputFields = m.params.map((p, pi) => {
+      const id = `${m.methodName}_arg${pi}`;
+      fieldIds.push(id);
+      const isInt = p.cppType === "int" || p.cppType === "int64_t" || p.cppType === "uint64_t" || p.cppType === "double";
+      if (isInt) {
+        return `                TextField {
+                    id: ${id}
+                    placeholderText: "${p.name}"
+                    Layout.preferredWidth: 80
+                    validator: IntValidator {}
+                }`;
+      }
+      return `                TextField {
+                    id: ${id}
+                    placeholderText: "${p.name}"
+                    Layout.fillWidth: true
+                }`;
+    }).join("\n");
 
-  // Build input fields and call args based on first method's params
-  const inputFields = firstMethod.params.map((p, i) => {
-    const id = `input${String.fromCharCode(65 + i)}`;
-    const isInt = p.cppType === "int" || p.cppType === "int64_t" || p.cppType === "uint64_t" || p.cppType === "double";
-    return `            TextField {
-                id: ${id}
-                placeholderText: "${p.name}"
-                Layout.preferredWidth: 80
-${isInt ? "                validator: IntValidator {}\n" : ""}            }`;
+    const callArgs = m.params.map((p, pi) => {
+      const id = fieldIds[pi];
+      const isInt = p.cppType === "int" || p.cppType === "int64_t" || p.cppType === "uint64_t" || p.cppType === "double";
+      return isInt ? `parseInt(${id}.text) || 0` : `${id}.text`;
+    }).join(", ");
+
+    return `        GroupBox {
+            title: "${m.methodName}"
+            Layout.fillWidth: true
+            RowLayout {
+                anchors.fill: parent
+                spacing: 8
+${inputFields ? "\n" + inputFields : ""}
+                Button {
+                    text: "${m.methodName}"
+                    enabled: root.ready
+                    onClicked: {
+                        logos.watch(backend.${m.methodName}(${callArgs}),
+                            function(value) { resultText.text = "${m.methodName}: " + value },
+                            function(error) { resultText.text = "${m.methodName} error: " + error }
+                        )
+                    }
+                }
+            }
+        }`;
   }).join("\n\n");
-
-  const callArgs = firstMethod.params.map((p, i) => {
-    const id = `input${String.fromCharCode(65 + i)}`;
-    const isInt = p.cppType === "int" || p.cppType === "int64_t" || p.cppType === "uint64_t" || p.cppType === "double";
-    return isInt ? `parseInt(${id}.text) || 0` : `${id}.text`;
-  }).join(", ");
 
   fs.writeFileSync(
     path.join(uiDir, "src/qml/Main.qml"),
@@ -1235,13 +1270,24 @@ Item {
     id: root
 
     readonly property var backend: logos.module("${uiName}")
-    readonly property bool ready: backend !== null && logos.isViewModuleReady("${uiName}")
+    property bool ready: false
     readonly property string status: backend ? backend.status : ""
+
+    Connections {
+        target: logos
+        function onViewModuleReadyChanged(moduleName, isReady) {
+            if (moduleName === "${uiName}")
+                root.ready = isReady && root.backend !== null;
+        }
+    }
+    Component.onCompleted: {
+        root.ready = root.backend !== null && logos.isViewModuleReady("${uiName}");
+    }
 
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 24
-        spacing: 16
+        spacing: 12
 
         Text {
             text: "${toPascalCase(uiName)} (C++ backend)"
@@ -1256,35 +1302,21 @@ Item {
             font.pixelSize: 12
         }
 
-        RowLayout {
-            spacing: 12
-            Layout.fillWidth: true
-
-${inputFields}
-
-            Button {
-                text: "${firstMethod.methodName}"
-                enabled: root.ready
-                onClicked: {
-                    logos.watch(backend.${firstMethod.methodName}(${callArgs}),
-                        function(value) { resultText.text = "Result: " + value },
-                        function(error) { resultText.text = "Error: " + error }
-                    )
-                }
-            }
-        }
+${methodGroups}
 
         Text {
             id: resultText
-            text: "Press ${firstMethod.methodName} to call the backend"
+            text: "Call a method above to see its result."
             color: "#56d364"
-            font.pixelSize: 15
+            font.pixelSize: 14
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
 
         Text {
             text: "Backend status: " + root.status
             color: "#8b949e"
-            font.pixelSize: 13
+            font.pixelSize: 12
         }
 
         Item { Layout.fillHeight: true }

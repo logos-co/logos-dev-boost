@@ -348,8 +348,19 @@ Item {
     id: root
 
     readonly property var backend: logos.module("my_app")
-    readonly property bool ready: backend !== null && logos.isViewModuleReady("my_app")
+    property bool ready: false
     readonly property string status: backend ? backend.status : ""
+
+    Connections {
+        target: logos
+        function onViewModuleReadyChanged(moduleName, isReady) {
+            if (moduleName === "my_app")
+                root.ready = isReady && root.backend !== null;
+        }
+    }
+    Component.onCompleted: {
+        root.ready = root.backend !== null && logos.isViewModuleReady("my_app");
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -389,8 +400,10 @@ Item {
 
 Key QML APIs:
 - `logos.module("name")` — typed Qt Remote Objects replica
-- `logos.isViewModuleReady("name")` — backend connection status
+- `logos.isViewModuleReady("name")` — backend connection check (use `viewModuleReadyChanged` signal for reactivity)
 - `logos.watch(pendingReply, onSuccess, onError)` — async slot call handling
+
+**Important:** `isViewModuleReady()` is a `Q_INVOKABLE` method, not a QML property. Binding it with `readonly property bool ready` will never re-evaluate. Always use the `Connections` + `Component.onCompleted` pattern shown above.
 
 ### Step 6: `CMakeLists.txt`
 
