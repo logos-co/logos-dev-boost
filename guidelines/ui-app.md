@@ -201,12 +201,20 @@ import QtQuick.Controls
 Item {
     id: root
 
-    // Typed replica — auto-synced properties and callable slots
     readonly property var backend: logos.module("my_app")
-    readonly property bool ready: backend !== null && logos.isViewModuleReady("my_app")
-
-    // Auto-synced property from .rep
+    property bool ready: false
     readonly property string status: backend ? backend.status : ""
+
+    Connections {
+        target: logos
+        function onViewModuleReadyChanged(moduleName, isReady) {
+            if (moduleName === "my_app")
+                root.ready = isReady && root.backend !== null;
+        }
+    }
+    Component.onCompleted: {
+        root.ready = root.backend !== null && logos.isViewModuleReady("my_app");
+    }
 
     Button {
         text: "Do Something"
@@ -227,8 +235,10 @@ Item {
 
 Key QML APIs:
 - `logos.module("name")` — returns a typed Qt Remote Objects replica
-- `logos.isViewModuleReady("name")` — checks if the backend process is connected
+- `logos.isViewModuleReady("name")` — checks backend connection (use `viewModuleReadyChanged` signal for reactivity)
 - `logos.watch(pendingReply, onSuccess, onError)` — handles async slot calls
+
+**Important:** `isViewModuleReady()` is a `Q_INVOKABLE` method, not a property. A QML binding like `readonly property bool ready: logos.isViewModuleReady("name")` will never re-evaluate. Use the `Connections` + `Component.onCompleted` pattern shown above instead.
 
 ## C++/QML Boundary Rules
 

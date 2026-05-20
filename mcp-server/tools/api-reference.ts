@@ -171,8 +171,11 @@ initLogos() is called when the plugin loads. Call setBackend(this) to wire up QT
 ## QML Frontend APIs
 
 - logos.module("name") — typed Qt Remote Objects replica
-- logos.isViewModuleReady("name") — backend connection status
-- logos.watch(pendingReply, onSuccess, onError) — async slot calls`,
+- logos.isViewModuleReady("name") — imperative backend connection check (not reactive in bindings)
+- viewModuleReadyChanged(moduleName, isReady) — signal; use via Connections for reactive ready state
+- logos.watch(pendingReply, onSuccess, onError) — async slot calls
+
+Note: isViewModuleReady() is Q_INVOKABLE, not a property. Do not bind it with \`readonly property bool ready\`. Use a Connections handler on viewModuleReadyChanged + Component.onCompleted.`,
 
   metadata: `# metadata.json Schema
 

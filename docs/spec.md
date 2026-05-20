@@ -381,8 +381,21 @@ import QtQuick
 import QtQuick.Controls
 
 Item {
+    id: root
+
     readonly property var backend: logos.module("notes_app")
-    readonly property bool ready: logos.isViewModuleReady("notes_app")
+    property bool ready: false
+
+    Connections {
+        target: logos
+        function onViewModuleReadyChanged(moduleName, isReady) {
+            if (moduleName === "notes_app")
+                root.ready = isReady && root.backend !== null;
+        }
+    }
+    Component.onCompleted: {
+        root.ready = root.backend !== null && logos.isViewModuleReady("notes_app");
+    }
 
     ListView {
         model: backend ? backend.notes : []

@@ -45,5 +45,8 @@ The C++ backend runs in a **separate isolated process** (`logos_host`), communic
 ### QML API
 
 - `logos.module("name")` — returns a typed Qt Remote Objects replica
-- `logos.isViewModuleReady("name")` — checks backend connection status
+- `logos.isViewModuleReady("name")` — checks backend connection status (imperative check, not reactive)
+- `viewModuleReadyChanged(moduleName, isReady)` — signal to listen for via `Connections`; use this instead of binding `isViewModuleReady()` in a property
 - `logos.watch(pendingReply, onSuccess, onError)` — handles async slot calls
+
+**Note:** `isViewModuleReady()` is a `Q_INVOKABLE` method. Binding it in a `readonly property` will not re-evaluate when the state changes. Use a `Connections` handler on `viewModuleReadyChanged` plus `Component.onCompleted` for the initial check.
