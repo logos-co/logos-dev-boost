@@ -12,9 +12,10 @@
 # so only the generated docs and example source remain.
 #
 # Specs covered:
-#   - dev-boost-scaffold-module.test.yaml        pure C++ module
-#   - dev-boost-scaffold-external-lib.test.yaml  module wrapping a C library
-#   - dev-boost-scaffold-ui-qml.test.yaml        pure QML UI app (headless UI test)
+#   - dev-boost-scaffold-module.test.yaml          pure C++ module
+#   - dev-boost-scaffold-external-lib.test.yaml    module wrapping a C library
+#   - dev-boost-scaffold-ui-qml.test.yaml          pure QML UI app (headless UI test)
+#   - dev-boost-scaffold-ui-qml-backend.test.yaml  QML view + process-isolated C++ backend (headless UI test)
 #
 # Run a single spec by passing its name (with or without .test.yaml):
 #   ./run.sh dev-boost-scaffold-external-lib
@@ -47,6 +48,7 @@ SPECS=(
   "dev-boost-scaffold-module.test.yaml"
   "dev-boost-scaffold-external-lib.test.yaml"
   "dev-boost-scaffold-ui-qml.test.yaml"
+  "dev-boost-scaffold-ui-qml-backend.test.yaml"
 )
 if [ "${1:-}" != "" ]; then
   one="$1"
