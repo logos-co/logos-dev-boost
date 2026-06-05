@@ -6,6 +6,19 @@ on:
   pull_request:
     branches: [master, main]
 
+# One-time setup for the clickable doc-test report links (publish-report job):
+#   Repo Settings → Pages → "Build and deployment" → Source: "Deploy from a
+#   branch", Branch: `gh-pages` / `(root)`. The publish-report job creates the
+#   gh-pages branch on its first run; GITHUB_TOKEN already has the permissions
+#   granted below. Each run publishes the HTML report to
+#   https://<owner>.github.io/<repo>/pr-<N>/  (PRs) or .../main/  (pushes), and
+#   posts/updates a PR comment with the link. Fork PRs get a read-only token, so
+#   for them the Pages push and comment are skipped (the artifact is still made).
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -112,13 +125,38 @@ jobs:
       # --release-for pins the {release} placeholder for logos-dev-boost to the
       # commit under test, so `github:logos-co/logos-dev-boost{release}` in the
       # spec becomes `.../<sha>`. Every other repo URL still resolves to latest.
+      # --report writes the two-column HTML report (rendered tutorial + the
+      # commands actually run and their output) that publish-report deploys.
+      # --continue-on-fail so the run walks every step and the report is complete;
+      # the job still fails (non-zero exit) if any step failed.
       - name: Run module-scaffold doc-test
         run: |
           nix run github:logos-co/logos-doctest -- run \
             doctests/dev-boost-scaffold-module.test.yaml \
             --verbose \
             --continue-on-fail \
-            --release-for logos-dev-boost=${{ steps.commit.outputs.sha }}
+            --release-for logos-dev-boost=${{ steps.commit.outputs.sha }} \
+            --report "${{ runner.temp }}/dev-boost-doctest-report.html"
+
+      - name: Stage report for upload
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p report-out
+          # Name it index.html so the published directory URL renders directly.
+          if [ -f "${{ runner.temp }}/dev-boost-doctest-report.html" ]; then
+            cp "${{ runner.temp }}/dev-boost-doctest-report.html" report-out/index.html
+          else
+            echo "<h1>No report produced</h1>" > report-out/index.html
+          fi
+
+      - name: Upload doc-test execution report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-boost-doctest-report
+          path: report-out/index.html
+          if-no-files-found: warn
 
       - name: Verify markdown generation
         run: |
@@ -128,3 +166,87 @@ jobs:
             -o /tmp/dev-boost-scaffold-module.md
           test -s /tmp/dev-boost-scaffold-module.md
           echo "Generated markdown successfully"
+
+  publish-report:
+    name: Publish doc-test report to GitHub Pages
+    needs: doctests
+    # Run even when the doc-test fails — a failing run is exactly when you want to
+    # open the report. Skip on forks, where GITHUB_TOKEN can't push or comment.
+    if: ${{ always() && github.event.pull_request.head.repo.fork != true }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write          # push to the gh-pages branch
+      pull-requests: write      # post/update the PR comment
+
+    # Serialize Pages pushes so two refs can't race on the gh-pages branch.
+    concurrency:
+      group: gh-pages-publish
+      cancel-in-progress: false
+
+    steps:
+      - name: Download report
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          # No `name:` → downloads every artifact into artifacts/<name>/...
+
+      - name: Arrange site directory
+        id: arrange
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="pr-${{ github.event.pull_request.number }}"
+          else
+            BASE="main"
+          fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+          found=""
+          src="artifacts/dev-boost-doctest-report/index.html"
+          if [ -f "$src" ]; then
+            mkdir -p "site/$BASE"
+            cp "$src" "site/$BASE/index.html"
+            found="yes"
+          fi
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to gh-pages
+        if: steps.arrange.outputs.found != ''
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          keep_files: true          # don't wipe other PRs' directories
+          commit_message: "Publish dev-boost doc-test report for ${{ steps.arrange.outputs.base }} (${{ github.sha }})"
+
+      - name: Comment on PR with report link
+        if: ${{ github.event_name == 'pull_request' && steps.arrange.outputs.found != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const base = "${{ steps.arrange.outputs.base }}";
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const url = `https://${owner}.github.io/${repo}/${base}/`;
+
+            const marker = "<!-- dev-boost-doctest-report-link -->";
+            const body =
+              `${marker}\n` +
+              `### 📊 dev-boost doc-test report\n\n` +
+              `The \`crypto_utils\` module scaffolded from this commit, built and run ` +
+              `end-to-end — rendered alongside the commands actually run and their ` +
+              `output (updated each run, commit \`${context.sha.slice(0,7)}\`):\n\n` +
+              `- [Execution report](${url})\n\n` +
+              `_Pages can take a minute to update after the run finishes._`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number: context.issue.number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: context.issue.number, body });
+            }

@@ -184,6 +184,8 @@ COMMIT="" ./run.sh             # run against the latest published dev-boost mast
 
 The scaffold the doc-test produces is checked in at `doctests/outputs/logos-crypto-utils/` as a reference of exactly what `init crypto_utils --type module` emits (sources, `metadata.json`, `flake.nix`, generated tests, and AI-context files). Build artifacts the run generates inside it are gitignored.
 
+In CI, the doc-test runs on every push and PR and publishes a two-column HTML execution report (rendered tutorial + the commands actually run and their output) to GitHub Pages at `https://<owner>.github.io/<repo>/pr-<N>/` (PRs) or `.../main/` (pushes); PRs also get a comment linking it. This requires enabling Pages once (Settings → Pages → Deploy from branch → `gh-pages` / root) — see the comment atop `.github/workflows/ci.yml`.
+
 ## Documentation
 
 - [docs/index.md](docs/index.md) — Documentation entry point
