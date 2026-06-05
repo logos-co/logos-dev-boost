@@ -165,6 +165,25 @@ Skills are task-specific knowledge modules that activate when the AI works on a 
 
 **UI Apps** — QML-based UI apps displayed in the Basecamp workspace. Two subtypes: pure QML (no C++, calls modules via `logos.callModule()`) or QML + C++ backend (process-isolated via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
+## Testing
+
+Two layers of end-to-end coverage:
+
+- **Scaffold build tests** (`tests/run-scaffold-tests.sh`) — for each `--type`, scaffold a project and `nix build` it, asserting the expected plugin binary is produced.
+- **Doc-tests** (`doctests/`) — executable tutorials run by the shared [logos-doctest](https://github.com/logos-co/logos-doctest) CLI. The same `.test.yaml` spec is both an assertion-bearing test and a rendered Markdown tutorial, so the docs can't drift from what actually runs.
+
+The first doc-test, `doctests/dev-boost-scaffold-module.test.yaml`, covers the pure C++ module workflow end-to-end: scaffold `crypto_utils` with **this** dev-boost commit, build it, introspect it with `lm`, run its generated unit tests, and call it through `logoscore`.
+
+```bash
+cd doctests
+./run.sh                       # run against this pushed commit, regenerate the tutorial
+COMMIT="" ./run.sh             # run against the latest published dev-boost master
+```
+
+`run.sh` runs the spec (asserting on every command's output), regenerates `outputs/dev-boost-scaffold-module.md` (the rendered tutorial, committed), and strips build artifacts. To exercise local edits to the doctest engine, point at a checkout: `DOCTEST="nix run path:../../logos-doctest --" ./run.sh`.
+
+The scaffold the doc-test produces is checked in at `doctests/outputs/logos-crypto-utils/` as a reference of exactly what `init crypto_utils --type module` emits (sources, `metadata.json`, `flake.nix`, generated tests, and AI-context files). Build artifacts the run generates inside it are gitignored.
+
 ## Documentation
 
 - [docs/index.md](docs/index.md) — Documentation entry point

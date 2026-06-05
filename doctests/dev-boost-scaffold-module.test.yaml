@@ -1,0 +1,249 @@
+name: "Scaffolding a Pure C++ Module with logos-dev-boost"
+output: dev-boost-scaffold-module.md
+release: ""
+
+intro: |
+  `logos-dev-boost` is the AI-assisted accelerator for the Logos platform: its
+  `init` command scaffolds a ready-to-build project — source, Nix build files,
+  tests, and AI context — from a single command. This doc-test exercises **this**
+  dev-boost commit end-to-end on its headline use case: a **universal (pure C++)
+  module**.
+
+  Starting from nothing, it:
+
+  1. Scaffolds a `crypto_utils` module with
+     `logos-dev-boost init crypto_utils --type module` — built from the commit
+     under test, not the latest published flake.
+  2. Builds the scaffolded module through Nix. The build runs
+     `logos-cpp-generator` over the plain C++ interface to synthesise all the Qt
+     plugin glue, so your code never touches Qt.
+  3. Introspects the compiled plugin with `lm`, confirming the `echo` method the
+     scaffold exposes is a discoverable `Q_INVOKABLE`.
+  4. Builds and runs the scaffold's generated unit tests (`nix build .#unit-tests`).
+  5. Loads the module into the headless `logoscore` runtime and calls `echo` —
+     a real IPC round-trip into the freshly-scaffolded module.
+
+  Because every step runs against the scaffold this dev-boost commit emits, a
+  green run is real evidence that `init --type module` still produces a module
+  that builds, introspects, tests, and runs.
+
+what_you_build: "A `crypto_utils` universal C++ module, scaffolded by this dev-boost commit, then built, introspected, unit-tested, and called through `logoscore`."
+
+what_you_learn:
+  - How `logos-dev-boost init --type module` scaffolds a pure C++ module
+  - How the Nix build generates Qt plugin glue from a plain C++ interface
+  - How to introspect a compiled module's `Q_INVOKABLE` methods with `lm`
+  - How to run a scaffolded module's generated unit tests
+  - How to call a module method through the headless `logoscore` runtime
+
+prerequisites:
+  - |
+    **Nix** with flakes enabled. Install from [nixos.org](https://nixos.org/download.html), then enable flakes:
+
+    ```bash
+    mkdir -p ~/.config/nix
+    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+    ```
+
+    Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
+  - "**git** — the scaffolded project is a flake, and Nix only sees git-tracked files."
+  - "A Linux or macOS machine."
+
+sections:
+  - title: "Scaffold the module"
+    step: true
+    text: |
+      Run `logos-dev-boost init` with `--type module`. This is the default and
+      most common project type: a **universal** module written in plain C++
+      (`std::string`, `int64_t`, `std::vector<T>`) with no Qt in your sources.
+      The command creates a `logos-crypto-utils/` directory containing the impl
+      class, `metadata.json`, a `flake.nix`, generated unit tests, and AI context
+      files.
+
+      > `{release}` pins dev-boost to the commit under test: the runner expands it
+      > to this checkout's `HEAD` locally (see `run.sh`), or the PR commit in CI.
+      > With no pin it falls back to the latest published `master`.
+    steps:
+      - title: "Run init"
+        run: "nix run 'github:logos-co/logos-dev-boost{release}' -- init crypto_utils --type module"
+        code_block: |
+          nix run github:logos-co/logos-dev-boost -- init crypto_utils --type module
+        check_file: "logos-crypto-utils/metadata.json"
+        post_text: |
+          The scaffold lays out a complete, buildable project:
+
+          ```
+          logos-crypto-utils/
+          ├── src/
+          │   ├── crypto_utils_impl.h     # Pure C++ interface — your code
+          │   └── crypto_utils_impl.cpp   # Implementation
+          ├── tests/
+          │   ├── main.cpp                # LOGOS_TEST_MAIN() entry point
+          │   ├── test_crypto_utils.cpp   # Generated unit tests
+          │   └── CMakeLists.txt          # logos_test() wiring
+          ├── metadata.json               # Module identity, deps, build config
+          ├── CMakeLists.txt              # logos_module() build config
+          ├── flake.nix                   # Nix build (generates Qt glue)
+          ├── AGENTS.md / CLAUDE.md       # AI context
+          └── .mcp.json / .claude/skills/ # MCP server + on-demand skills
+          ```
+
+      - title: "Confirm the key source files exist"
+        check_file: "logos-crypto-utils/src/crypto_utils_impl.h"
+
+      - title: "Confirm the flake and generated tests exist"
+        check_file: "logos-crypto-utils/flake.nix"
+
+      - title: "Inspect the generated interface"
+        text: |
+          The scaffold's interface is plain C++ — a single `echo` method, no Qt
+          types. The Nix build turns this into a Qt plugin for you.
+        run: "cat logos-crypto-utils/src/crypto_utils_impl.h"
+        check_file: "logos-crypto-utils/tests/test_crypto_utils.cpp"
+        expect_contains:
+          - "std::string echo"
+        post_text: |
+          `echo(const std::string&)` is the module's entire public API. Every
+          public method on this class becomes a discoverable, callable module
+          method once the build generates the Qt glue around it.
+
+  - title: "Build the module"
+    step: true
+    text: |
+      `nix build` compiles the scaffolded module. Under the hood the flake runs
+      `logos-cpp-generator --from-header` over `crypto_utils_impl.h` to synthesise
+      the Qt plugin wrapper and dispatch code, then builds the plugin. Nix only
+      sees git-tracked files, so we `git init` and stage everything first.
+    steps:
+      - title: "Init git, stage, and build"
+        run: "sh -c 'cd logos-crypto-utils && git init -q && git add -A && nix build'"
+        code_block: |
+          cd logos-crypto-utils
+          git init && git add -A
+          nix build
+        check_file: "logos-crypto-utils/result/lib/crypto_utils_plugin.{ext}"
+        post_text: |
+          The build produces `result/lib/crypto_utils_plugin.{ext}` — a Qt plugin
+          wrapping your plain `CryptoUtilsImpl` class. No Qt appeared in your
+          sources; the generator produced all of it.
+
+  - title: "Inspect the module with `lm`"
+    step: true
+    text: |
+      [`lm`](https://github.com/logos-co/logos-module) is the module inspector: it
+      loads a compiled plugin and prints its metadata and the `Q_INVOKABLE`
+      methods it exposes. Build it once and link it as `./lm`.
+    steps:
+      - title: "Build lm"
+        run: "nix build 'github:logos-co/logos-module#lm' -o lm"
+        check_file: "lm/bin/lm"
+        post_text: "The inspector is at `./lm/bin/lm`."
+
+      - title: "Inspect the plugin"
+        text: |
+          Point `lm` at the built plugin. It reports the module name from
+          `metadata.json` and lists `echo` among the exposed methods — proof the
+          generator turned the plain C++ method into a real module API.
+        run: "./lm/bin/lm logos-crypto-utils/result/lib/crypto_utils_plugin.{ext}"
+        code_block: "lm crypto_utils_plugin.{ext}"
+        expect_contains:
+          - "crypto_utils"
+          - "echo"
+
+  - title: "Run the generated unit tests"
+    step: true
+    text: |
+      Because a universal module is a plain C++ class, the scaffold ships unit
+      tests that construct `CryptoUtilsImpl` directly — no Qt, no host, no IPC.
+      The generated `tests/test_crypto_utils.cpp` asserts that `echo("hello")`
+      returns `"echo: hello"`. `nix build .#unit-tests` compiles and runs them.
+    steps:
+      - title: "Build and run the unit tests"
+        # Use a separate out-link so the default `result` (the plugin from the
+        # previous step) is preserved for inspection.
+        run: "sh -c 'cd logos-crypto-utils && nix build .#unit-tests -L -o result-tests'"
+        code_block: |
+          nix build '.#unit-tests' -L
+        post_text: |
+          The build compiles `crypto_utils_impl.cpp` against the test sources and
+          runs every `LOGOS_TEST`. A failed assertion prints its file/line and
+          fails the build; a green build means every generated test passed.
+
+  - title: "Run the module in `logoscore`"
+    step: true
+    text: |
+      Finally, run the scaffolded module in the real headless runtime. Build the
+      [`logoscore`](https://github.com/logos-co/logos-logoscore-cli) CLI, install
+      the module into a runtime `modules/` directory, then start the daemon, load
+      `crypto_utils`, and call `echo` — a real IPC round-trip into the module.
+    steps:
+      - title: "Build logoscore"
+        run: "nix build 'github:logos-co/logos-logoscore-cli' -o logos"
+        check_file: "logos/bin/logoscore"
+        post_text: "The runtime is at `./logos/bin/logoscore`."
+
+      - title: "Install the module into a runtime directory"
+        text: |
+          `logoscore` discovers modules from `modules/<name>/` directories, each
+          with a `manifest.json` beside the plugin. The scaffold's flake exposes a
+          ready-to-use `#install` output that produces exactly that layout — build
+          it and link it as `./modules-install`.
+        run: "sh -c 'cd logos-crypto-utils && nix build .#install -o ../modules-install'"
+        code_block: |
+          cd logos-crypto-utils
+          nix build '.#install' -o ../modules-install
+        check_file: "modules-install/modules/crypto_utils/manifest.json"
+        post_text: |
+          `modules-install/modules/crypto_utils/` now holds the plugin, its
+          `manifest.json`, and a platform `variant` marker — the layout the host
+          scans at startup.
+
+      - title: "Start the daemon"
+        text: |
+          Start logoscore in daemon mode pointed at the installed modules
+          directory, capturing output to `logs.txt`:
+        run: "sh -c './logos/bin/logoscore -D -m modules-install/modules > logs.txt 2>&1 &'"
+        code_block: "logoscore -D -m modules-install/modules > logs.txt &"
+        post_text: |
+          The `-D` flag starts the background daemon; the client subcommands below
+          connect to it via the config under `~/.logoscore/`.
+
+      - run: "sleep 3"
+
+      - title: "List discovered modules"
+        text: "`crypto_utils` should appear in the scan directory:"
+        run: "./logos/bin/logoscore list-modules"
+        code_block: "logoscore list-modules"
+        expect_contains:
+          - "crypto_utils"
+
+      - title: "Load the module"
+        text: "Load `crypto_utils` into the running daemon:"
+        run: "./logos/bin/logoscore load-module crypto_utils"
+        code_block: "logoscore load-module crypto_utils"
+        expect_contains:
+          - "crypto_utils"
+          - '"status":"ok"'
+
+      - title: "Call echo"
+        text: |
+          Call `echo` with a string argument. This is a real round-trip: the
+          client sends the call to the daemon, the host dispatches it to the
+          plugin's generated glue, which invokes `CryptoUtilsImpl::echo`, and the
+          result travels back over IPC.
+        run: "./logos/bin/logoscore call crypto_utils echo hello"
+        code_block: "logoscore call crypto_utils echo hello"
+        expect_contains:
+          - '"result":"echo: hello"'
+        post_text: |
+          `echo: hello` comes straight from `CryptoUtilsImpl::echo` — the plain
+          C++ method you saw in Step 1, now compiled into a Qt plugin, loaded by
+          the host, and invoked over IPC.
+
+      - title: "Stop the daemon"
+        text: "Shut the daemon down cleanly:"
+        run: "./logos/bin/logoscore stop"
+        code_block: "logoscore stop"
+        post_text: |
+          The scaffold this dev-boost commit produced builds, introspects, tests,
+          and runs end-to-end.
