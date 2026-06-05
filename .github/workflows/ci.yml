@@ -129,10 +129,14 @@ jobs:
       # commands actually run and their output) that publish-report deploys.
       # --continue-on-fail so the run walks every step and the report is complete;
       # the job still fails (non-zero exit) if any step failed.
-      - name: Run module-scaffold doc-test
+      # Both scaffold specs run back-to-back into one combined report (one
+      # dropdown entry each): the pure C++ module and the module wrapping an
+      # external C library.
+      - name: Run module-scaffold doc-tests
         run: |
           nix run github:logos-co/logos-doctest -- run \
             doctests/dev-boost-scaffold-module.test.yaml \
+            doctests/dev-boost-scaffold-external-lib.test.yaml \
             --verbose \
             --continue-on-fail \
             --release-for logos-dev-boost=${{ steps.commit.outputs.sha }} \
@@ -160,11 +164,13 @@ jobs:
 
       - name: Verify markdown generation
         run: |
-          nix run github:logos-co/logos-doctest -- generate \
-            doctests/dev-boost-scaffold-module.test.yaml \
-            --release-for logos-dev-boost=${{ steps.commit.outputs.sha }} \
-            -o /tmp/dev-boost-scaffold-module.md
-          test -s /tmp/dev-boost-scaffold-module.md
+          for spec in dev-boost-scaffold-module dev-boost-scaffold-external-lib; do
+            nix run github:logos-co/logos-doctest -- generate \
+              "doctests/$spec.test.yaml" \
+              --release-for logos-dev-boost=${{ steps.commit.outputs.sha }} \
+              -o "/tmp/$spec.md"
+            test -s "/tmp/$spec.md"
+          done
           echo "Generated markdown successfully"
 
   publish-report:
