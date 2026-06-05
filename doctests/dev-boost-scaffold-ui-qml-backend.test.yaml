@@ -1,0 +1,462 @@
+name: "Scaffolding a QML UI App with a C++ Backend (logos-dev-boost)"
+output: dev-boost-scaffold-ui-qml-backend.md
+release: ""
+
+intro: |
+  The [companion doc-test](dev-boost-scaffold-ui-qml.md) scaffolds a **pure
+  QML** app: a `Main.qml` the host renders, with no C++ and all logic in the
+  view. This one covers the next step up — `--type ui-qml-backend`, a UI app
+  whose logic lives in a **process-isolated C++ backend**. The QML view runs in
+  the host; the backend runs in a separate `ui-host` process; the two talk over
+  [Qt Remote Objects](https://doc.qt.io/qt-6/qtremoteobjects-index.html) via a
+  typed replica. A backend crash can't take the host down with it.
+
+  Unlike the pure-QML template (whose default button only logs to the console),
+  the `ui-qml-backend` scaffold is **interactive out of the box**: the generated
+  C++ backend computes `add(a, b)` in its own process and hands the result back
+  to the view. It declares no module dependencies, so it builds and runs
+  standalone — no extra modules to wire up.
+
+  This doc-test exercises **this** dev-boost commit end-to-end on that workflow:
+
+  1. Scaffold a `notes_app` with `init notes_app --type ui-qml-backend` — built
+     from the commit under test, not the latest published flake.
+  2. Reshape the generated `.rep` interface and backend so the app speaks
+     *notes*: a single `recordNote()` slot that records a note in the backend and
+     returns a confirmation string. This is the real development loop — edit the
+     `.rep`, and `repc` regenerates the typed source/replica the backend and QML
+     build against.
+  3. Build it. `mkLogosQmlModule` compiles the backend, runs `repc`, builds the
+     replica-factory plugin, bundles the QML, and exposes a standalone
+     `nix run` app.
+  4. **Launch the app headlessly** (`QT_QPA_PLATFORM=offscreen`) and drive it
+     through its QML inspector with
+     [`logos-qt-mcp`](https://github.com/logos-co/logos-qt-mcp): wait for the
+     view to report **Connected** (the replica finished its async handshake with
+     the ui-host backend), screenshot the initial state, **click Add Note**,
+     confirm the on-screen text changes from `No notes yet` to `Added note #1` —
+     a value computed in the isolated backend and returned over the socket — then
+     screenshot the result.
+
+  A green run is real evidence that `init --type ui-qml-backend` still produces a
+  UI app that builds, spawns its backend, completes the Remote Objects handshake,
+  and round-trips a call through the isolated backend and back into the view.
+
+what_you_build: "The `notes_app` standalone UI app — a QML view over a process-isolated C++ backend, scaffolded by this dev-boost commit and driven headlessly: clicking a button, calling into the backend, and confirming the value it returns appears on screen."
+
+what_you_learn:
+  - How `init --type ui-qml-backend` scaffolds a QML view plus a process-isolated C++ backend
+  - How the `.rep` file is the single source of truth `repc` turns into the typed source + replica
+  - How a SLOT return value reaches QML via `logos.watch()` — call into the backend, reply over the socket
+  - How to confirm a Qt Remote Objects round-trip headlessly with logos-qt-mcp (wait for ready, click, assert, screenshot)
+
+prerequisites:
+  - |
+    **Nix** with flakes enabled. Install from [nixos.org](https://nixos.org/download.html), then enable flakes:
+
+    ```bash
+    mkdir -p ~/.config/nix
+    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+    ```
+
+    Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
+  - "**git** — the scaffolded project is a flake, and Nix only sees git-tracked files."
+  - "**A Linux or macOS machine.** The app runs headless via `QT_QPA_PLATFORM=offscreen`, so no display is required."
+
+sections:
+  - title: "Scaffold the backend UI app"
+    step: true
+    text: |
+      Run `init` with `--type ui-qml-backend`. This is the QML-plus-C++ app type:
+      a `Main.qml` rendered by the host, backed by a C++ plugin that runs in a
+      separate `ui-host` process. The command creates a `logos-notes-app/`
+      directory with the QML view, the backend sources, a `.rep` interface
+      definition, `metadata.json`, a `flake.nix`, and AI context files.
+
+      > `{release}` pins dev-boost to the commit under test: the runner expands it
+      > to this checkout's `HEAD` locally (see `run.sh`), or the PR commit in CI.
+      > With no pin it falls back to the latest published `master`.
+    steps:
+      - title: "Run init"
+        run: "nix run 'github:logos-co/logos-dev-boost{release}' -- init notes_app --type ui-qml-backend"
+        code_block: |
+          nix run github:logos-co/logos-dev-boost -- init notes_app --type ui-qml-backend
+        check_file: "logos-notes-app/src/notes_app.rep"
+        post_text: |
+          The scaffold lays out a complete, runnable backend UI app:
+
+          ```
+          logos-notes-app/
+          ├── src/
+          │   ├── notes_app.rep            # Remote interface — the source of truth for repc
+          │   ├── notes_app_interface.h    # Logos plugin interface (name/version)
+          │   ├── notes_app_plugin.h       # Backend: inherits NotesAppSimpleSource
+          │   ├── notes_app_plugin.cpp     # Backend implementation (runs in ui-host)
+          │   └── qml/Main.qml             # The QML view — talks to the backend replica
+          ├── metadata.json                # type: ui_qml, main: notes_app_plugin
+          ├── CMakeLists.txt               # logos_module(... REP_FILE src/notes_app.rep)
+          ├── flake.nix                    # mkLogosQmlModule (standalone app)
+          ├── AGENTS.md / CLAUDE.md         # AI context
+          └── .mcp.json / .claude/skills/  # MCP server + on-demand skills
+          ```
+
+      - title: "Inspect the generated interface and backend"
+        text: |
+          The `.rep` file is the **single source of truth** for what crosses the
+          process boundary. At build time Qt's `repc` compiler turns it into a
+          `NotesAppSimpleSource` base class (which the backend overrides) and a
+          `NotesAppReplica` (which the QML view consumes). The scaffold ships a
+          two-line interface — one auto-synced property, one callable slot:
+        run: "cat logos-notes-app/src/notes_app.rep"
+        check_file: "logos-notes-app/src/notes_app_plugin.cpp"
+        expect_contains:
+          - "PROP(QString status READWRITE)"
+          - "SLOT(int add(int a, int b))"
+        post_text: |
+          Two kinds of member, two interaction patterns:
+
+          - **`SLOT(int add(int a, int b))`** — a *call and reply*. QML invokes it
+            on the replica; the call runs in the backend process; the return value
+            comes back asynchronously. In QML you read it with `logos.watch(...)`.
+            This doc-test drives the app through a slot like this one.
+          - **`PROP(QString status READWRITE)`** — *auto-synced state*. When the
+            backend calls `setStatus(...)`, the new value propagates to the replica
+            and any QML bound to `backend.status` updates. (Binding a `var`-typed
+            dynamic replica's property reactively in QML has its own subtleties, so
+            the proven pattern — and the one we drive below — routes confirmable
+            results through the slot's reply.)
+
+          `metadata.json` declares `"type": "ui_qml"` with `"main":
+          "notes_app_plugin"` — the `main` field is what tells the builder there's
+          a compiled backend, not just a QML file.
+
+  - title: "Make it a notes app"
+    step: true
+    text: |
+      The scaffold is a generic adder. To give the UI a concrete, observable job —
+      and to exercise the real edit-the-`.rep` development loop — reshape the
+      interface so it speaks *notes*. We change three files in lockstep, because
+      the `.rep` is a contract the other two must honor:
+
+      - **`notes_app.rep`** — replace `add()` with a `recordNote()` slot returning
+        a `QString` confirmation. (We keep the `status` property the scaffold
+        ships, so the backend still demonstrates `setStatus()`.)
+      - **`notes_app_plugin.h`** — match the new slot signature the generated
+        `NotesAppSimpleSource` now declares.
+      - **`notes_app_plugin.cpp`** — count notes in the backend and return a
+        confirmation string for each one.
+
+      Everything still runs in the isolated backend process; only the interface
+      changes.
+    steps:
+      - title: "Rewrite the .rep interface"
+        text: |
+          A single slot that records a note and returns a confirmation string,
+          plus the auto-synced `status` line:
+        file:
+          path: logos-notes-app/src/notes_app.rep
+          language: rep
+          content: |
+            class NotesApp
+            {
+                // Auto-synced to the QML replica: the backend updates this and the
+                // view re-renders with no explicit call.
+                PROP(QString status READWRITE)
+
+                // Call-and-reply: records a note in the backend and returns a
+                // confirmation the view shows via logos.watch().
+                SLOT(QString recordNote())
+            }
+        post_text: |
+          `repc` regenerates `NotesAppSimpleSource` from this on the next build —
+          the backend's override and the replica the QML consumes both come from
+          here, so the three files stay in sync by construction.
+
+      - title: "Match the slot in the backend header"
+        text: |
+          Replace the generated `int add(int a, int b)` slot with the new
+          signature. The class still inherits the three generated bases —
+          `NotesAppSimpleSource` (typed source), `NotesAppInterface` (Logos
+          plugin), and `NotesAppViewPluginBase` (remoting glue):
+        file:
+          path: logos-notes-app/src/notes_app_plugin.h
+          language: cpp
+          content: |
+            #ifndef NOTES_APP_PLUGIN_H
+            #define NOTES_APP_PLUGIN_H
+
+            #include <QString>
+            #include <QVariantList>
+            #include "notes_app_interface.h"
+            #include "LogosViewPluginBase.h"
+            #include "rep_notes_app_source.h"
+
+            class LogosAPI;
+
+            class NotesAppPlugin : public NotesAppSimpleSource,
+                                   public NotesAppInterface,
+                                   public NotesAppViewPluginBase
+            {
+                Q_OBJECT
+                Q_PLUGIN_METADATA(IID NotesAppInterface_iid FILE "metadata.json")
+                Q_INTERFACES(NotesAppInterface)
+
+            public:
+                explicit NotesAppPlugin(QObject* parent = nullptr);
+                ~NotesAppPlugin() override;
+
+                QString name()    const override { return "notes_app"; }
+                QString version() const override { return "1.0.0"; }
+
+                Q_INVOKABLE void initLogos(LogosAPI* api);
+
+                // Slot from notes_app.rep — records a note and returns a confirmation.
+                QString recordNote() override;
+
+            signals:
+                void eventResponse(const QString& eventName, const QVariantList& args);
+
+            private:
+                LogosAPI* m_logosAPI = nullptr;
+                int m_noteCount = 0;
+            };
+
+            #endif // NOTES_APP_PLUGIN_H
+        post_text: |
+          The only interface change from the scaffold is the slot: `int add(int,
+          int)` becomes `QString recordNote()`, and we add an `m_noteCount` member
+          to hold the backend's state across calls.
+
+      - title: "Implement the backend"
+        text: |
+          On each call, bump the count, update the auto-synced `status`, and return
+          a confirmation string. Both the property write and the return value cross
+          the process boundary back to the view:
+        file:
+          path: logos-notes-app/src/notes_app_plugin.cpp
+          language: cpp
+          content: |
+            #include "notes_app_plugin.h"
+            #include "logos_api.h"
+            #include <QDebug>
+
+            NotesAppPlugin::NotesAppPlugin(QObject* parent)
+                : NotesAppSimpleSource(parent)
+            {
+                setStatus("No notes yet");
+            }
+
+            NotesAppPlugin::~NotesAppPlugin() = default;
+
+            void NotesAppPlugin::initLogos(LogosAPI* api)
+            {
+                m_logosAPI = api;
+                setBackend(this);
+                qDebug() << "NotesAppPlugin: initialized";
+            }
+
+            QString NotesAppPlugin::recordNote()
+            {
+                m_noteCount += 1;
+                // Auto-synced PROP: the view's "Notes: N" line re-renders on its own.
+                setStatus(QStringLiteral("Notes: %1").arg(m_noteCount));
+                // SLOT return value: delivered to the caller via logos.watch().
+                return QStringLiteral("Added note #%1").arg(m_noteCount);
+            }
+        post_text: |
+          `setStatus()` (inherited from the generated `NotesAppSimpleSource`)
+          pushes the new property value to the replica; the `return` travels back
+          as the slot's pending reply. The two are independent channels, and the
+          UI test below asserts on **both**.
+
+      - title: "Update the QML view"
+        text: |
+          Point the view at the new slot. The structure is the scaffold's own —
+          resolve the typed replica with `logos.module("notes_app")`, track the
+          async `ready` state, gate the button on it — with the button now calling
+          `recordNote()` and a status line bound to the auto-synced `status`
+          property:
+        file:
+          path: logos-notes-app/src/qml/Main.qml
+          language: qml
+          content: |
+            import QtQuick
+            import QtQuick.Controls
+            import QtQuick.Layouts
+
+            Item {
+                id: root
+
+                // Typed replica of the backend running in the ui-host process.
+                readonly property var backend: logos.module("notes_app")
+                property bool ready: false
+
+                // Auto-synced PROP — updates on its own when the backend calls setStatus().
+                readonly property string status: backend ? backend.status : ""
+
+                // The backend connects asynchronously, so the replica isn't usable
+                // the instant the view loads. isViewModuleReady() is a Q_INVOKABLE
+                // (not a property), so re-check it on the signal and once at startup.
+                Connections {
+                    target: logos
+                    function onViewModuleReadyChanged(moduleName, isReady) {
+                        if (moduleName === "notes_app")
+                            root.ready = isReady && root.backend !== null;
+                    }
+                }
+                Component.onCompleted: {
+                    root.ready = root.backend !== null && logos.isViewModuleReady("notes_app");
+                }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 24
+                    spacing: 16
+
+                    Text {
+                        text: "NotesApp (C++ backend)"
+                        font.pixelSize: 20
+                        font.bold: true
+                        color: "#ffffff"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    // Reactive backend-connection indicator.
+                    Text {
+                        text: root.ready ? "Connected" : "Connecting to backend..."
+                        color: root.ready ? "#56d364" : "#f0883e"
+                        font.pixelSize: 12
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Button {
+                        text: "Add Note"
+                        enabled: root.ready
+                        Layout.alignment: Qt.AlignHCenter
+                        onClicked: {
+                            // SLOT call: the reply comes back via logos.watch().
+                            logos.watch(backend.recordNote(),
+                                function(value) { resultText.text = String(value) },
+                                function(error) { resultText.text = "Error: " + error }
+                            )
+                        }
+                    }
+
+                    // Shows the slot's RETURN VALUE (call-and-reply).
+                    Text {
+                        id: resultText
+                        text: "Press Add Note to record one"
+                        color: "#56d364"
+                        font.pixelSize: 15
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    // Shows the auto-synced PROP (no explicit call).
+                    Text {
+                        text: "Backend status: " + root.status
+                        color: "#8b949e"
+                        font.pixelSize: 13
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+        post_text: |
+          `resultText` shows the **return value** of `recordNote()`, delivered
+          through `logos.watch()` — the call-and-reply channel the headless test
+          asserts on. The status line below it binds to `backend.status` for
+          reference; the confirmable proof of the round-trip is the returned string,
+          which is what we drive and check.
+
+  - title: "Build the app"
+    step: true
+    text: |
+      `nix build` compiles the backend and packages the app. `mkLogosQmlModule`
+      sees `main` in `metadata.json`, so it runs `repc` on the `.rep`, compiles
+      `notes_app_plugin`, builds the separate `notes_app_replica_factory` the host
+      loads to mint typed replicas, bundles the QML, and wires up `apps.default`.
+      Nix only sees git-tracked files, so we `git init` and stage everything first.
+    steps:
+      - title: "Init git, stage, and build"
+        run: "sh -c 'cd logos-notes-app && git init -q && git add -A && nix build'"
+        code_block: |
+          cd logos-notes-app
+          git init && git add -A
+          nix build
+        check_file: "logos-notes-app/result"
+        post_text: |
+          The build produces a `result` containing the compiled backend plugin, the
+          replica factory, the staged QML, and the standalone app entry point.
+
+  - title: "Launch the app, click the button, and verify the round-trip"
+    step: true
+    text: |
+      Launch the standalone app with `nix run` and drive it headlessly through its
+      QML inspector. The doc-test builds
+      [`logos-qt-mcp`](https://github.com/logos-co/logos-qt-mcp) (the harness that
+      connects to the inspector), waits for the view to report **Connected** — i.e.
+      the replica finished its asynchronous handshake with the ui-host backend —
+      screenshots the initial state, **clicks Add Note**, and confirms the call
+      crossed into the backend and back by asserting the result line changed to
+      `Added note #1` — a string computed in the isolated backend and returned over
+      the socket via `logos.watch()`.
+
+      > The app is launched with `QT_QPA_PLATFORM=offscreen`, so it runs without a
+      > display — the same way it runs in CI. The backend still spawns as its own
+      > `ui-host` process; only the rendering surface is virtual.
+    steps:
+      - title: "Launch and drive the app"
+        ui_test:
+          launch: "nix run ./logos-notes-app"
+          setup:
+            - "nix build 'github:logos-co/logos-qt-mcp' -o result-mcp"
+          qt_mcp: "result-mcp"
+          build_timeout: 1800
+          launch_timeout: 300
+          tests:
+            # "Connected" only appears once the replica has finished its async
+            # handshake with the backend in the ui-host process — so waiting for
+            # it proves the process boundary came up, not just that QML rendered.
+            - name: "View loads and connects to the backend"
+              action: wait_for
+              texts: ["NotesApp (C++ backend)", "Connected", "Add Note"]
+              timeout: 60000
+            # Let the first frame settle before grabbing the offscreen surface.
+            - name: "Capture the initial UI"
+              action: sleep
+              ms: 1000
+              text: |
+                The app on launch: the view reports **Connected** (the C++ backend
+                replica completed its handshake) and the result line reads **Press
+                Add Note to record one**.
+              screenshot: "notes-app-before.png"
+            - name: "Click the Add Note button"
+              action: click
+              target: "Add Note"
+            # The SLOT return value, delivered via logos.watch() — this only
+            # appears if the call reached the backend process and came back.
+            - name: "Backend reply appears on screen"
+              action: wait_for
+              texts: ["Added note #1"]
+              timeout: 10000
+            # Give the offscreen surface a moment to repaint, then capture.
+            - name: "Capture the UI after the click"
+              action: sleep
+              ms: 1500
+              text: |
+                After one click of **Add Note**, the result line has re-rendered to
+                **Added note #1** — the string `recordNote()` computed in the
+                isolated backend, returned over the socket, and delivered to the
+                view through `logos.watch()`.
+              screenshot: "notes-app-after.png"
+        post_text: |
+          This is a real Qt Remote Objects round-trip driven headlessly. The test
+          waits for **Connected** (proving the ui-host backend process came up and
+          the replica handshake completed), clicks **Add Note**, and asserts the
+          result line changed to `Added note #1` — a value that can only appear if
+          the call reached the backend and its reply came back through
+          `logos.watch()`. The wait would time out if the boundary were broken, so
+          a green run proves the scaffolded app builds, spawns its backend,
+          connects, and round-trips a call end to end. Both screenshots are
+          embedded above and in the CI report.

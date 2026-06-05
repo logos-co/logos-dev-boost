@@ -1,0 +1,33 @@
+{
+  "name": "crypto_utils",
+  "version": "1.0.0",
+  "description": "Logos module",
+  "author": "",
+  "type": "core",
+  "interface": "universal",
+  "category": "general",
+  "main": "crypto_utils_plugin",
+  "dependencies": [],
+  "include": [],
+  "capabilities": [],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [
+      {
+        "name": "cipher",
+        "vendor_path": "lib"
+      }
+    ],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [
+        "lib"
+      ],
+      "extra_link_libraries": []
+    }
+  }
+}

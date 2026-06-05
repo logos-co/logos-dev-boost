@@ -1,0 +1,310 @@
+name: "Wrapping an External C Library with logos-dev-boost"
+output: dev-boost-scaffold-external-lib.md
+release: ""
+
+intro: |
+  Most real modules wrap an existing C or C++ library — libsodium, SQLite, a
+  vendor SDK. `logos-dev-boost` automates the boilerplate: point `init` at a
+  directory of C sources with `--lib-dir`, and it parses the header, copies the
+  library in, and **generates a pure C++ wrapper class** with one method per C
+  function, mapping C types to the Logos type system. (`--lib-dir` implies
+  `--external-lib`; passing `--external-lib` alone scaffolds an empty external
+  library you fill in by hand.)
+
+  This doc-test exercises **this** dev-boost commit end-to-end on that workflow:
+
+  1. Write a tiny C library, `libcipher` (a header + its `.c` source).
+  2. Scaffold a `crypto_utils` module with
+     `init crypto_utils --type module --lib-dir ./lib` — built from the commit
+     under test. The scaffold parses `libcipher.h` and generates a
+     `CryptoUtilsImpl` C++ class wrapping every function.
+  3. Build the module. The C source is compiled straight into the plugin and the
+     Qt glue is generated from the wrapper header — no Qt in your code.
+  4. Introspect the compiled plugin with `lm` and run the generated unit tests.
+  5. Install the module and call its methods through the `logoscore` daemon —
+     each call a real round-trip into the wrapped C library.
+
+  A green run is real evidence that `init --lib-dir` still produces a module that
+  correctly wraps a C library and runs end-to-end.
+
+what_you_build: "A `crypto_utils` module wrapping a small C library (`libcipher`), scaffolded by this dev-boost commit, then built, introspected, unit-tested, and called through `logoscore`."
+
+what_you_learn:
+  - How `init --lib-dir` parses a C header and generates a C++ wrapper class
+  - How C types map to the Logos type system (`int` → `int64_t`, `const char*` → `std::string`)
+  - How a source-only C library is compiled straight into the plugin
+  - How to introspect, unit-test, and call the wrapped module through `logoscore`
+
+prerequisites:
+  - |
+    **Nix** with flakes enabled. Install from [nixos.org](https://nixos.org/download.html), then enable flakes:
+
+    ```bash
+    mkdir -p ~/.config/nix
+    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+    ```
+
+    Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
+  - "**git** — the scaffolded project is a flake, and Nix only sees git-tracked files."
+  - "A Linux or macOS machine."
+
+sections:
+  - title: "Write the C library to wrap"
+    step: true
+    text: |
+      Start with a small, self-contained C library: a header declaring three
+      functions and its implementation. This stands in for any real C library you
+      might wrap (libsodium, SQLite, a vendor SDK).
+    steps:
+      - title: "Create lib/libcipher.h"
+        file:
+          path: lib/libcipher.h
+          language: c
+          content: |
+            #ifndef LIBCIPHER_H
+            #define LIBCIPHER_H
+
+            #ifdef __cplusplus
+            extern "C" {
+            #endif
+
+            /** Sum of the byte values of `text` (a simple checksum). */
+            int cipher_checksum(const char* text);
+
+            /** Caesar-shift a character code by `shift` positions. */
+            int cipher_caesar_shift(int code, int shift);
+
+            /** Library version string. Caller must NOT free. */
+            const char* cipher_version(void);
+
+            #ifdef __cplusplus
+            }
+            #endif
+
+            #endif /* LIBCIPHER_H */
+
+      - title: "Create lib/libcipher.c"
+        file:
+          path: lib/libcipher.c
+          language: c
+          content: |
+            #include "libcipher.h"
+
+            int cipher_checksum(const char* text)
+            {
+                int sum = 0;
+                if (!text) return 0;
+                for (const char* p = text; *p; ++p)
+                    sum += (unsigned char)*p;
+                return sum;
+            }
+
+            int cipher_caesar_shift(int code, int shift)
+            {
+                return code + shift;
+            }
+
+            const char* cipher_version(void)
+            {
+                return "1.0.0";
+            }
+        post_text: |
+          The library directory now holds just `lib/libcipher.h` and
+          `lib/libcipher.c` — a source-only C library, no pre-built binaries.
+
+  - title: "Scaffold the module"
+    step: true
+    text: |
+      Run `init` with `--lib-dir ./lib`. dev-boost parses `libcipher.h`, copies
+      the library into the project, and generates a `CryptoUtilsImpl` C++ class
+      with one method per C function — converting C types to the Logos type
+      system as it goes.
+
+      > `{release}` pins dev-boost to the commit under test: the runner expands it
+      > to this checkout's `HEAD` locally (see `run.sh`), or the PR commit in CI.
+      > With no pin it falls back to the latest published `master`.
+    steps:
+      - title: "Run init with --lib-dir"
+        run: "nix run 'github:logos-co/logos-dev-boost{release}' -- init crypto_utils --type module --lib-dir ./lib"
+        code_block: |
+          nix run github:logos-co/logos-dev-boost -- init crypto_utils --type module --lib-dir ./lib
+        check_file: "logos-crypto-utils/metadata.json"
+        post_text: |
+          The scaffold copies the library in and generates the wrapper, build
+          files, and one unit test per function:
+
+          ```
+          logos-crypto-utils/
+          ├── lib/
+          │   ├── libcipher.h             # copied from --lib-dir
+          │   └── libcipher.c             # compiled into the plugin
+          ├── src/
+          │   ├── crypto_utils_impl.h     # generated C++ wrapper class
+          │   └── crypto_utils_impl.cpp   # calls through to the C functions
+          ├── tests/                      # one test per wrapped function
+          ├── metadata.json               # declares the external library
+          ├── CMakeLists.txt              # LANGUAGES C CXX; compiles libcipher.c
+          └── flake.nix
+          ```
+
+      - title: "Confirm the library was copied in"
+        check_file: "logos-crypto-utils/lib/libcipher.c"
+
+      - title: "Inspect the generated wrapper"
+        text: |
+          The generated impl header `extern "C"`-includes the library and declares
+          a typed method per C function. Note the type mapping: C `int` becomes
+          `int64_t`, and `const char*` becomes `std::string` (return) or
+          `const std::string&` (parameter).
+        run: "cat logos-crypto-utils/src/crypto_utils_impl.h"
+        check_file: "logos-crypto-utils/src/crypto_utils_impl.cpp"
+        expect_contains:
+          - 'extern "C"'
+          - "libcipher.h"
+          - "int64_t checksum"
+          - "std::string version"
+        post_text: |
+          The implementation (`crypto_utils_impl.cpp`) calls each C function with
+          the necessary casts — e.g. `::cipher_checksum(text.c_str())` — so your
+          module API stays pure C++ while the real work happens in the C library.
+
+  - title: "Build the module"
+    step: true
+    text: |
+      `nix build` compiles the module. Because the library is source-only
+      (`.c` + `.h`), the scaffold's `CMakeLists.txt` enables `LANGUAGES C CXX` and
+      compiles `libcipher.c` straight into the plugin; `logos-cpp-generator`
+      produces the Qt glue from the wrapper header. Nix only sees git-tracked
+      files, so we `git init` and stage everything first.
+    steps:
+      - title: "Init git, stage, and build"
+        run: "sh -c 'cd logos-crypto-utils && git init -q && git add -A && nix build'"
+        code_block: |
+          cd logos-crypto-utils
+          git init && git add -A
+          nix build
+        check_file: "logos-crypto-utils/result/lib/crypto_utils_plugin.{ext}"
+        post_text: |
+          The build produces `result/lib/crypto_utils_plugin.{ext}` — a Qt plugin
+          with the C library statically linked in.
+
+  - title: "Inspect the module with `lm`"
+    step: true
+    text: |
+      [`lm`](https://github.com/logos-co/logos-module) is the module inspector.
+      Build it, then point it at the plugin to confirm the wrapped C functions are
+      exposed as module methods.
+    steps:
+      - title: "Build lm"
+        run: "nix build 'github:logos-co/logos-module#lm' -o lm"
+        check_file: "lm/bin/lm"
+        post_text: "The inspector is at `./lm/bin/lm`."
+
+      - title: "Inspect the plugin"
+        text: |
+          `lm` lists each wrapped function as a callable method — `checksum`,
+          `caesar_shift`, and `version`.
+        run: "./lm/bin/lm logos-crypto-utils/result/lib/crypto_utils_plugin.{ext}"
+        code_block: "lm crypto_utils_plugin.{ext}"
+        expect_contains:
+          - "crypto_utils"
+          - "checksum"
+          - "caesar_shift"
+          - "version"
+
+  - title: "Run the generated unit tests"
+    step: true
+    text: |
+      The scaffold generates one `LOGOS_TEST` per wrapped function that constructs
+      `CryptoUtilsImpl` directly and calls the method — no Qt, no host, no IPC.
+      `nix build .#unit-tests` compiles and runs them.
+    steps:
+      - title: "Build and run the unit tests"
+        # Separate out-link so the default `result` (the plugin) is preserved.
+        run: "sh -c 'cd logos-crypto-utils && nix build .#unit-tests -L -o result-tests'"
+        code_block: |
+          nix build '.#unit-tests' -L
+        post_text: |
+          A green build means every generated test compiled, linked against the C
+          library, and passed.
+
+  - title: "Run the module in `logoscore`"
+    step: true
+    text: |
+      Finally, run the module in the real headless runtime. Build
+      [`logoscore`](https://github.com/logos-co/logos-logoscore-cli), install the
+      module into a runtime `modules/` directory, then start the daemon and call
+      the wrapped functions — each call a real round-trip through the C library.
+    steps:
+      - title: "Build logoscore"
+        run: "nix build 'github:logos-co/logos-logoscore-cli' -o logos"
+        check_file: "logos/bin/logoscore"
+        post_text: "The runtime is at `./logos/bin/logoscore`."
+
+      - title: "Install the module into a runtime directory"
+        text: |
+          `logoscore` discovers modules from `modules/<name>/` directories, each
+          with a `manifest.json`. The scaffold's flake exposes a ready-to-use
+          `#install` output that produces exactly that layout.
+        run: "sh -c 'cd logos-crypto-utils && nix build .#install -o ../modules-install'"
+        code_block: |
+          cd logos-crypto-utils
+          nix build '.#install' -o ../modules-install
+        check_file: "modules-install/modules/crypto_utils/manifest.json"
+
+      - title: "Start the daemon"
+        text: |
+          Start logoscore in daemon mode pointed at the installed modules
+          directory, capturing output to `logs.txt`:
+        run: "sh -c './logos/bin/logoscore -D -m modules-install/modules > logs.txt 2>&1 &'"
+        code_block: "logoscore -D -m modules-install/modules > logs.txt &"
+
+      - run: "sleep 3"
+
+      - title: "Load the module"
+        text: "Load `crypto_utils` into the running daemon:"
+        run: "./logos/bin/logoscore load-module crypto_utils"
+        code_block: "logoscore load-module crypto_utils"
+        expect_contains:
+          - "crypto_utils"
+          - '"status":"ok"'
+
+      - title: "Call checksum"
+        text: |
+          `cipher_checksum` sums the byte values of its argument. For `hello` that
+          is `104 + 101 + 108 + 108 + 111 = 532` — a deterministic round-trip
+          through the wrapped C function:
+        run: "./logos/bin/logoscore call crypto_utils checksum hello"
+        code_block: "logoscore call crypto_utils checksum hello"
+        expect_contains:
+          - '"result":532'
+
+      - title: "Call caesar_shift"
+        text: |
+          `cipher_caesar_shift` adds `shift` to a character code. `5 + 3` is `8`,
+          exercising an `int → int64_t` round-trip in both directions:
+        run: "./logos/bin/logoscore call crypto_utils caesar_shift 5 3"
+        code_block: "logoscore call crypto_utils caesar_shift 5 3"
+        expect_contains:
+          - '"result":8'
+
+      - title: "Call version"
+        text: |
+          `cipher_version` returns a C string; the wrapper converts it to a
+          `std::string`, which comes back as `"1.0.0"`:
+        run: "./logos/bin/logoscore call crypto_utils version"
+        code_block: "logoscore call crypto_utils version"
+        expect_contains:
+          - '"result":"1.0.0"'
+        post_text: |
+          Three real calls into the wrapped `libcipher` — a checksum, an integer
+          shift, and a version string — all dispatched over IPC into C functions
+          the scaffold wrapped automatically from the header.
+
+      - title: "Stop the daemon"
+        text: "Shut the daemon down cleanly:"
+        run: "./logos/bin/logoscore stop"
+        code_block: "logoscore stop"
+        post_text: |
+          The module this dev-boost commit scaffolded from a raw C library builds,
+          introspects, tests, and runs end-to-end.
