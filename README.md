@@ -172,23 +172,30 @@ Two layers of end-to-end coverage:
 - **Scaffold build tests** (`tests/run-scaffold-tests.sh`) — for each `--type`, scaffold a project and `nix build` it, asserting the expected plugin binary is produced.
 - **Doc-tests** (`doctests/`) — executable tutorials run by the shared [logos-doctest](https://github.com/logos-co/logos-doctest) CLI. The same `.test.yaml` spec is both an assertion-bearing test and a rendered Markdown tutorial, so the docs can't drift from what actually runs.
 
-Two doc-tests cover the core module workflows end-to-end (scaffold with **this** dev-boost commit → build → introspect with `lm` → run generated unit tests → call through `logoscore`):
+Three doc-tests cover the core scaffold workflows end-to-end (each scaffolds with **this** dev-boost commit, then builds and exercises the result):
 
-- `doctests/dev-boost-scaffold-module.test.yaml` — a pure C++ module (`init crypto_utils --type module`).
+- `doctests/dev-boost-scaffold-module.test.yaml` — a pure C++ module (`init crypto_utils --type module`): build → introspect with `lm` → run generated unit tests → call through `logoscore`.
 - `doctests/dev-boost-scaffold-external-lib.test.yaml` — a module wrapping a small C library (`init crypto_utils --type module --lib-dir ./lib`); verifies dev-boost parses the C header, generates the C++ wrapper, compiles the library into the plugin, and that the wrapped functions return correct values over IPC.
+- `doctests/dev-boost-scaffold-ui-qml.test.yaml` — a pure QML UI app (`init notes_ui --type ui-qml`): builds the standalone app and drives it **headlessly** through its QML inspector with [logos-qt-mcp](https://github.com/logos-co/logos-qt-mcp), asserting on the rendered UI and capturing a screenshot.
 
 ```bash
 cd doctests
-./run.sh                                   # run both specs, regenerate the tutorials
-./run.sh dev-boost-scaffold-external-lib   # run a single spec
+./run.sh                                   # run all specs, regenerate the tutorials
+./run.sh dev-boost-scaffold-ui-qml         # run a single spec
 COMMIT="" ./run.sh                         # run against the latest published dev-boost master
 ```
 
 `run.sh` runs each spec (asserting on every command's output), regenerates the rendered tutorials under `outputs/*.md` (committed), and strips build artifacts. To exercise local edits to the doctest engine, point at a checkout: `DOCTEST="nix run path:../../logos-doctest --" ./run.sh`.
 
-The scaffolds the doc-tests produce are checked in under `doctests/outputs/logos-crypto-utils/` (pure module) and `doctests/outputs/logos-crypto-utils-extlib/` (library wrapper) as references of exactly what `init` emits (sources, `metadata.json`, `flake.nix`, generated tests, and AI-context files). Build artifacts the runs generate inside them are gitignored.
+The specs `git init` a scaffolded project and (for the UI app) `dlopen()` its plugin, so they need a filesystem that allows git loose objects and is not mounted `noexec`. `run.sh` builds in `outputs/` when it can, and otherwise auto-stages in `$XDG_RUNTIME_DIR`/`$TMPDIR`/`$HOME`/`/var/tmp`/`/tmp` and copies the cleaned result back. On some sandboxes (e.g. Docker Desktop / OrbStack bind mounts) none of those work; the script prints why each was rejected and you point it at a known-good path:
 
-In CI, both doc-tests run on every push and PR and publish a two-column HTML execution report (rendered tutorials + the commands actually run and their output) to GitHub Pages at `https://<owner>.github.io/<repo>/pr-<N>/` (PRs) or `.../main/` (pushes); PRs also get a comment linking it. This requires enabling Pages once (Settings → Pages → Deploy from branch → `gh-pages` / root) — see the comment atop `.github/workflows/ci.yml`.
+```bash
+DOCTEST_BUILD_DIR="$HOME/.cache/logos-doctest" ./run.sh
+```
+
+The scaffolds the doc-tests produce are checked in under `doctests/outputs/logos-crypto-utils/` (pure module), `doctests/outputs/logos-crypto-utils-extlib/` (library wrapper), and `doctests/outputs/logos-notes-ui/` (QML UI app) as references of exactly what `init` emits (sources, `metadata.json`, `flake.nix`, generated tests, and AI-context files). UI screenshots captured by the run are committed under `doctests/outputs/images/`; other build artifacts are gitignored.
+
+In CI, all three doc-tests run on every push and PR and publish a two-column HTML execution report (rendered tutorials with embedded screenshots + the commands actually run and their output) to GitHub Pages at `https://<owner>.github.io/<repo>/pr-<N>/` (PRs) or `.../main/` (pushes); PRs also get a comment linking it. This requires enabling Pages once (Settings → Pages → Deploy from branch → `gh-pages` / root) — see the comment atop `.github/workflows/ci.yml`.
 
 ## Documentation
 

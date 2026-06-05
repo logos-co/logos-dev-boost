@@ -1,0 +1,23 @@
+{
+  "name": "notes_ui",
+  "version": "1.0.0",
+  "description": "Logos UI app",
+  "type": "ui_qml",
+  "category": "ui",
+  "view": "Main.qml",
+  "icon": null,
+  "dependencies": [],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}

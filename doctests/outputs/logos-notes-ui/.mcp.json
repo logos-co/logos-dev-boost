@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "logos-dev-boost": {
+      "command": "/nix/store/1cjddb0jcrdyfyv2b5r9jlqa57f54bm6-nodejs-20.19.5/bin/node",
+      "args": [
+        "/nix/store/pzd6xhpky87iz66msgqp4kgrmd236kf1-logos-dev-boost-0.1.0/lib/logos-dev-boost/dist/mcp-server/index.js"
+      ]
+    }
+  }
+}

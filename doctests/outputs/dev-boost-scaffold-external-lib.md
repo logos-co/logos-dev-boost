@@ -180,7 +180,7 @@ git init && git add -A
 nix build
 ```
 
-The build produces `result/lib/crypto_utils_plugin.so` — a Qt plugin
+The build produces `result/lib/crypto_utils_plugin.dylib` — a Qt plugin
 with the C library statically linked in.
 
 ---
@@ -205,7 +205,7 @@ The inspector is at `./lm/bin/lm`.
 `caesar_shift`, and `version`.
 
 ```bash
-lm crypto_utils_plugin.so
+lm crypto_utils_plugin.dylib
 ```
 
 ---

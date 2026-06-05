@@ -129,14 +129,15 @@ jobs:
       # commands actually run and their output) that publish-report deploys.
       # --continue-on-fail so the run walks every step and the report is complete;
       # the job still fails (non-zero exit) if any step failed.
-      # Both scaffold specs run back-to-back into one combined report (one
-      # dropdown entry each): the pure C++ module and the module wrapping an
-      # external C library.
+      # All scaffold specs run back-to-back into one combined report (one
+      # dropdown entry each): the pure C++ module, the module wrapping an
+      # external C library, and the pure QML UI app (driven headlessly).
       - name: Run module-scaffold doc-tests
         run: |
           nix run github:logos-co/logos-doctest -- run \
             doctests/dev-boost-scaffold-module.test.yaml \
             doctests/dev-boost-scaffold-external-lib.test.yaml \
+            doctests/dev-boost-scaffold-ui-qml.test.yaml \
             --verbose \
             --continue-on-fail \
             --release-for logos-dev-boost=${{ steps.commit.outputs.sha }} \
@@ -164,7 +165,7 @@ jobs:
 
       - name: Verify markdown generation
         run: |
-          for spec in dev-boost-scaffold-module dev-boost-scaffold-external-lib; do
+          for spec in dev-boost-scaffold-module dev-boost-scaffold-external-lib dev-boost-scaffold-ui-qml; do
             nix run github:logos-co/logos-doctest -- generate \
               "doctests/$spec.test.yaml" \
               --release-for logos-dev-boost=${{ steps.commit.outputs.sha }} \

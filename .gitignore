@@ -3,11 +3,17 @@ dist/
 result/
 
 # Doc-test output: build artifacts are disposable, but keep the rendered .md
-# tutorials and the scaffolded example projects (doctests/outputs/logos-crypto-utils*/).
+# tutorials, the embedded screenshots, and the scaffolded example projects
+# (doctests/outputs/logos-*/).
 doctests/outputs/*
 !doctests/outputs/*.md
-!doctests/outputs/logos-crypto-utils*/
+!doctests/outputs/images/
+!doctests/outputs/logos-*/
 # ...but never the build artifacts a doc-test run produces inside the examples.
-doctests/outputs/logos-crypto-utils*/.git/
-doctests/outputs/logos-crypto-utils*/result
-doctests/outputs/logos-crypto-utils*/result-*
+doctests/outputs/logos-*/.git/
+doctests/outputs/logos-*/result
+doctests/outputs/logos-*/result-*
+doctests/outputs/logos-*/result-mcp
+doctests/outputs/logos-*/flake.lock
+doctests/outputs/logos-*/generated_code/
+doctests/outputs/logos-*/modules/
