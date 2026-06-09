@@ -295,6 +295,11 @@ export function handleScaffold(args: Record<string, unknown>) {
       }
     }
   }
+  // No-arg methods leave sampleCallArgs empty — omit it so the suggested
+  // `logoscore call` command has no trailing space / empty arg.
+  const sampleCall = sampleCallArgs
+    ? `${sampleMethod} ${sampleCallArgs}`
+    : sampleMethod;
 
   return {
     content: [
@@ -311,7 +316,7 @@ export function handleScaffold(args: Record<string, unknown>) {
                   `cd ${name}-module && git init && git add -A && nix build`,
                   `cd ../${name}-ui && git init && git add -A && nix build`,
                   `logoscore -D -m ./${name}-module/result/lib -l ${name} &`,
-                  `logoscore call ${name} ${sampleMethod} ${sampleCallArgs}`,
+                  `logoscore call ${name} ${sampleCall}`,
                   "logoscore stop",
                 ]
               : [
@@ -322,7 +327,7 @@ export function handleScaffold(args: Record<string, unknown>) {
                     ? [
                         "nix build .#unit-tests -L",
                         `logoscore -D -m ./result/lib -l ${name} &`,
-                        `logoscore call ${name} ${sampleMethod} ${sampleCallArgs}`,
+                        `logoscore call ${name} ${sampleCall}`,
                         "logoscore stop",
                       ]
                     : [`nix run .`]),

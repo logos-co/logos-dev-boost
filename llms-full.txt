@@ -1398,7 +1398,7 @@ logoscore arguments:
 - `-l <mod1,mod2>` -- Comma-separated modules to pre-load on startup
 - `call <module> <method> [args...]` -- Call a method on a loaded module
 
-Type auto-detection in `-c` args: `true`/`false` -> bool, `42` -> int, `3.14` -> double, else -> string. Use `@filename` to load file content as an argument.
+Type auto-detection in `call` args: `true`/`false` -> bool, `42` -> int, `3.14` -> double, else -> string. Use `@filename` to load file content as an argument.
 
 ### TEST_GROUPS
 
