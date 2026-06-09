@@ -68,7 +68,9 @@ lgpm --modules-dir ./test-modules info <name>
 ## Step 6: Test the Installed Package
 
 ```bash
-logoscore -m ./test-modules -l <name> -c "<name>.someMethod(test)"
+logoscore -D -m ./test-modules -l <name> &
+logoscore call <name> someMethod test
+logoscore stop
 ```
 
 ## Portable Builds

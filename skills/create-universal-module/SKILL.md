@@ -219,8 +219,10 @@ logos_test(
 # Unit tests (direct impl class testing, no logoscore needed)
 nix build .#unit-tests -L
 
-# Integration test via logoscore
-logoscore -m ./result/lib -l <name> -c "<name>.exampleMethod(test)"
+# Integration test via logoscore (start a daemon, then call via the client)
+logoscore -D -m ./result/lib -l <name> &
+logoscore call <name> exampleMethod test
+logoscore stop
 ```
 
 For mocking other modules or C libraries in tests, see the `testing-modules` skill.
