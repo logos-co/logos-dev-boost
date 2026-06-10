@@ -175,8 +175,10 @@ This produces `generated_code/crypto_utils_qt_glue.h` and `generated_code/crypto
 **Step 4: Test with logoscore**
 
 ```bash
-logoscore -m ./result/lib -l crypto_utils \
-  -c "crypto_utils.hash(hello_world)"
+logoscore -D -m ./result/lib &
+logoscore load-module crypto_utils
+logoscore call crypto_utils hash hello_world
+logoscore stop
 ```
 
 **Step 5: Unit test (no logoscore needed)**
@@ -1374,27 +1376,32 @@ nix flake check -L           # All Nix checks including tests
 
 ## Integration Tests with logoscore
 
-Test the module as a loaded plugin via the headless runtime:
+Test the module as a loaded plugin via the headless runtime. Start a clean daemon,
+load the module(s), then call methods with the `call` client command:
 
 ```bash
-logoscore -m ./result/lib -l my_module \
-  -c "my_module.doSomething(test_input)"
+# Start a clean daemon, then load the module(s) (deps resolved automatically)
+logoscore -D -m ./result/lib &
+logoscore load-module my_module
+logoscore load-module other_module
 
-logoscore -m ./result/lib -l my_module \
-  -c "my_module.init(config)" \
-  -c "my_module.process(data)"
+# Call methods (positional args; @file reads a parameter from a file)
+logoscore call my_module doSomething test_input
+logoscore call my_module init config
+logoscore call my_module process data
+logoscore call my_module callOther hello
 
-logoscore -m ./result/lib -l my_module,other_module \
-  -c "my_module.callOther(hello)"
+# Stop the daemon when done
+logoscore stop
 ```
 
 logoscore arguments:
+- `-D` -- Start the daemon
 - `-m <path>` -- Directory to scan for module plugins (repeatable)
-- `-l <mod1,mod2>` -- Comma-separated modules to load
-- `-c "<module>.<method>(args)"` -- Call a method (repeatable, sequential)
-- `--quit-on-finish` -- Exit after calls complete (for CI)
+- `-l <mod1,mod2>` -- Comma-separated modules to pre-load on startup
+- `call <module> <method> [args...]` -- Call a method on a loaded module
 
-Type auto-detection in `-c` args: `true`/`false` -> bool, `42` -> int, `3.14` -> double, else -> string. Use `@filename` to load file content as an argument.
+Type auto-detection in `call` args: `true`/`false` -> bool, `42` -> int, `3.14` -> double, else -> string. Use `@filename` to load file content as an argument.
 
 ### TEST_GROUPS
 
@@ -1481,8 +1488,8 @@ This lets AI agents visually verify UI changes, click through workflows, and deb
 - `tests/CMakeLists.txt` must use `include(LogosTest)` + `logos_test()`
 - Use `LogosTestContext` for mocking module calls and C library functions
 - Integration tests verify the full plugin lifecycle (load, call, response)
-- Always test with `--quit-on-finish` in CI to ensure the process exits
-- 30-second timeout per `-c` call; exit code 1 on failure
+- In CI, start the daemon in the background, run your `call`s, then `logoscore stop` so the job exits
+- 30-second timeout per `call`; exit code non-zero on failure
 - After adding `checks` to a repo's `flake.nix`, run `ws sync-graph` so the workspace discovers them
 
 
@@ -1926,9 +1933,12 @@ MyModuleImpl impl;
 assert(impl.doSomething("test") == "expected");
 ```
 
-Integration tests use `logoscore`:
+Integration tests use `logoscore` (start a daemon, then call via the client):
 ```bash
-logoscore -m ./result/lib -l my_module -c "my_module.doSomething(test)"
+logoscore -D -m ./result/lib &
+logoscore load-module my_module
+logoscore call my_module doSomething test
+logoscore stop
 ```
 
 

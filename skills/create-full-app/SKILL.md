@@ -37,7 +37,10 @@ cd <name>-module
 git init && git add -A
 nix build
 lm ./result/lib/<name>_plugin.so
-logoscore -m ./result/lib -l <name> -c "<name>.echo(hello)"
+logoscore -D -m ./result/lib &
+logoscore load-module <name>
+logoscore call <name> echo hello
+logoscore stop
 cd ..
 
 # 2. Build the UI app (module must be git-tracked for the path: flake input)

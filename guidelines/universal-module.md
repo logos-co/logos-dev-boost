@@ -107,7 +107,10 @@ MyModuleImpl impl;
 assert(impl.doSomething("test") == "expected");
 ```
 
-Integration tests use `logoscore`:
+Integration tests use `logoscore` (start a daemon, then call via the client):
 ```bash
-logoscore -m ./result/lib -l my_module -c "my_module.doSomething(test)"
+logoscore -D -m ./result/lib &
+logoscore load-module my_module
+logoscore call my_module doSomething test
+logoscore stop
 ```

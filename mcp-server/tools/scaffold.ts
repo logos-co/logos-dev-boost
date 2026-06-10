@@ -276,8 +276,10 @@ export function handleScaffold(args: Record<string, unknown>) {
 
   const relFiles = filesCreated.map((f) => path.relative(parentDir, f));
 
-  // Pick a representative method name for next_steps hints
-  let sampleCall = `${name}.echo(hello)`;
+  // Pick a representative method + args for next_steps hints (daemon `call`
+  // takes positional, space-separated args).
+  let sampleMethod = "echo";
+  let sampleCallArgs = "hello";
   if (libDir) {
     const header = findHeaderInDir(libDir);
     if (header) {
@@ -286,13 +288,18 @@ export function handleScaffold(args: Record<string, unknown>) {
       const methods = cFunctionsToCppMethods(funcs, libName);
       if (methods.length > 0) {
         const m = methods[0];
-        const sampleArgs = m.params.map((p) =>
+        sampleMethod = m.methodName;
+        sampleCallArgs = m.params.map((p) =>
           p.cppType.includes("string") ? "hello" : "42"
-        ).join(", ");
-        sampleCall = `${name}.${m.methodName}(${sampleArgs})`;
+        ).join(" ");
       }
     }
   }
+  // No-arg methods leave sampleCallArgs empty — omit it so the suggested
+  // `logoscore call` command has no trailing space / empty arg.
+  const sampleCall = sampleCallArgs
+    ? `${sampleMethod} ${sampleCallArgs}`
+    : sampleMethod;
 
   return {
     content: [
@@ -308,7 +315,10 @@ export function handleScaffold(args: Record<string, unknown>) {
                   "git init && git add -A",
                   `cd ${name}-module && git init && git add -A && nix build`,
                   `cd ../${name}-ui && git init && git add -A && nix build`,
-                  `logoscore -m ./${name}-module/result/lib -l ${name} -c "${sampleCall}"`,
+                  `logoscore -D -m ./${name}-module/result/lib &`,
+                  `logoscore load-module ${name}`,
+                  `logoscore call ${name} ${sampleCall}`,
+                  "logoscore stop",
                 ]
               : [
                   `cd ${path.basename(projectDir)}`,
@@ -317,7 +327,10 @@ export function handleScaffold(args: Record<string, unknown>) {
                   ...(type === "module"
                     ? [
                         "nix build .#unit-tests -L",
-                        `logoscore -m ./result/lib -l ${name} -c "${sampleCall}"`,
+                        `logoscore -D -m ./result/lib &`,
+                        `logoscore load-module ${name}`,
+                        `logoscore call ${name} ${sampleCall}`,
+                        "logoscore stop",
                       ]
                     : [`nix run .`]),
                 ],

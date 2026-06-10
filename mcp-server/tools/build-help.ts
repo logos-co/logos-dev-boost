@@ -173,7 +173,10 @@ function testHelp(project: { isUniversal: boolean; isFullApp: boolean; name: str
     lines.push("```\n");
     lines.push("### Integration test with logoscore\n");
     lines.push("```bash");
-    lines.push(`logoscore -m ./${project.moduleDir}/result/lib -l ${project.name} -c "${project.name}.methodName(args)"`);
+    lines.push(`logoscore -D -m ./${project.moduleDir}/result/lib &`);
+    lines.push(`logoscore load-module ${project.name}`);
+    lines.push(`logoscore call ${project.name} methodName args`);
+    lines.push("logoscore stop");
     lines.push("```\n");
     lines.push("### In the workspace\n");
     lines.push("```bash");
@@ -203,7 +206,10 @@ function testHelp(project: { isUniversal: boolean; isFullApp: boolean; name: str
 
   lines.push("### Integration Tests with logoscore\n");
   lines.push("```bash");
-  lines.push(`logoscore -m ./result/lib -l ${project.name} -c "${project.name}.methodName(args)"`);
+  lines.push(`logoscore -D -m ./result/lib &`);
+  lines.push(`logoscore load-module ${project.name}`);
+  lines.push(`logoscore call ${project.name} methodName args`);
+  lines.push("logoscore stop");
   lines.push("```\n");
 
   lines.push("### In the workspace\n");
@@ -222,7 +228,10 @@ function runHelp(project: { isUniversal: boolean; isUiApp: boolean; isFullApp: b
 \`\`\`bash
 # Build and test module
 cd ${project.moduleDir} && nix build
-logoscore -m ./${project.moduleDir}/result/lib -l ${project.name} -c "${project.name}.echo(hello)"
+logoscore -D -m ./${project.moduleDir}/result/lib &
+logoscore load-module ${project.name}
+logoscore call ${project.name} echo hello
+logoscore stop
 
 # Build UI app
 cd ${project.uiDir} && nix build
@@ -250,12 +259,15 @@ QML changes hot-reload in dev mode. C++ changes require rebuild.`;
 
 \`\`\`bash
 nix build
-logoscore -m ./result/lib -l ${project.name}
+# Start a clean daemon, then load the module
+logoscore -D -m ./result/lib &
+logoscore load-module ${project.name}
 \`\`\`
 
-To call a method:
+To call a method (then stop the daemon when done):
 \`\`\`bash
-logoscore -m ./result/lib -l ${project.name} -c "${project.name}.methodName(args)"
+logoscore call ${project.name} methodName args
+logoscore stop
 \`\`\``;
 }
 
@@ -297,7 +309,10 @@ lgx verify ${project.name}.lgx
 lgpm --modules-dir ./test-modules install --file ${project.name}.lgx
 
 # Test installed package
-logoscore -m ./test-modules -l ${project.name} -c "${project.name}.methodName(args)"
+logoscore -D -m ./test-modules &
+logoscore load-module ${project.name}
+logoscore call ${project.name} methodName args
+logoscore stop
 \`\`\``;
 }
 
