@@ -175,7 +175,8 @@ This produces `generated_code/crypto_utils_qt_glue.h` and `generated_code/crypto
 **Step 4: Test with logoscore**
 
 ```bash
-logoscore -D -m ./result/lib -l crypto_utils &
+logoscore -D -m ./result/lib &
+logoscore load-module crypto_utils
 logoscore call crypto_utils hash hello_world
 logoscore stop
 ```
@@ -1375,12 +1376,14 @@ nix flake check -L           # All Nix checks including tests
 
 ## Integration Tests with logoscore
 
-Test the module as a loaded plugin via the headless runtime. Start a daemon
-with the module(s) loaded, then call methods with the `call` client command:
+Test the module as a loaded plugin via the headless runtime. Start a clean daemon,
+load the module(s), then call methods with the `call` client command:
 
 ```bash
-# Start a daemon with the module(s) loaded (deps resolved automatically)
-logoscore -D -m ./result/lib -l my_module,other_module &
+# Start a clean daemon, then load the module(s) (deps resolved automatically)
+logoscore -D -m ./result/lib &
+logoscore load-module my_module
+logoscore load-module other_module
 
 # Call methods (positional args; @file reads a parameter from a file)
 logoscore call my_module doSomething test_input
@@ -1932,7 +1935,8 @@ assert(impl.doSomething("test") == "expected");
 
 Integration tests use `logoscore` (start a daemon, then call via the client):
 ```bash
-logoscore -D -m ./result/lib -l my_module &
+logoscore -D -m ./result/lib &
+logoscore load-module my_module
 logoscore call my_module doSomething test
 logoscore stop
 ```

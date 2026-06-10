@@ -175,7 +175,8 @@ This produces `generated_code/crypto_utils_qt_glue.h` and `generated_code/crypto
 **Step 4: Test with logoscore**
 
 ```bash
-logoscore -D -m ./result/lib -l crypto_utils &
+logoscore -D -m ./result/lib &
+logoscore load-module crypto_utils
 logoscore call crypto_utils hash hello_world
 logoscore stop
 ```

@@ -37,7 +37,8 @@ cd <name>-module
 git init && git add -A
 nix build
 lm ./result/lib/<name>_plugin.so
-logoscore -D -m ./result/lib -l <name> &
+logoscore -D -m ./result/lib &
+logoscore load-module <name>
 logoscore call <name> echo hello
 logoscore stop
 cd ..

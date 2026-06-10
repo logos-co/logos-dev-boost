@@ -180,21 +180,24 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   lines.push("");
   lines.push("```bash");
   if (project.type === "full-app") {
-    lines.push(`# Test the module: start a daemon with it loaded, call a method, stop`);
-    lines.push(`logoscore -D -m ./${project.moduleDir}/result/lib -l ${project.moduleName} &`);
+    lines.push(`# Test the module: start a clean daemon, load the module, call a method, stop`);
+    lines.push(`logoscore -D -m ./${project.moduleDir}/result/lib &`);
+    lines.push(`logoscore load-module ${project.moduleName}`);
     lines.push(`logoscore call ${project.moduleName} methodName args`);
     lines.push("logoscore stop");
     lines.push("");
     lines.push("# Inspect module methods");
     lines.push(`lm ./${project.moduleDir}/result/lib/${project.moduleName}_plugin.so`);
   } else {
-    lines.push("# Integration test with logoscore: start a daemon with the module");
-    lines.push("# loaded, call a method, then stop it");
+    lines.push("# Integration test with logoscore: start a clean daemon, load the");
+    lines.push("# module, call a method, then stop it");
     if (project.name !== "unknown") {
-      lines.push(`logoscore -D -m ./result/lib -l ${project.name} &`);
+      lines.push(`logoscore -D -m ./result/lib &`);
+      lines.push(`logoscore load-module ${project.name}`);
       lines.push(`logoscore call ${project.name} methodName args`);
     } else {
-      lines.push("logoscore -D -m ./result/lib -l <module> &");
+      lines.push("logoscore -D -m ./result/lib &");
+      lines.push("logoscore load-module <module>");
       lines.push("logoscore call <module> methodName args");
     }
     lines.push("logoscore stop");

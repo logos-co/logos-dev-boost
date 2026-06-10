@@ -315,7 +315,8 @@ export function handleScaffold(args: Record<string, unknown>) {
                   "git init && git add -A",
                   `cd ${name}-module && git init && git add -A && nix build`,
                   `cd ../${name}-ui && git init && git add -A && nix build`,
-                  `logoscore -D -m ./${name}-module/result/lib -l ${name} &`,
+                  `logoscore -D -m ./${name}-module/result/lib &`,
+                  `logoscore load-module ${name}`,
                   `logoscore call ${name} ${sampleCall}`,
                   "logoscore stop",
                 ]
@@ -326,7 +327,8 @@ export function handleScaffold(args: Record<string, unknown>) {
                   ...(type === "module"
                     ? [
                         "nix build .#unit-tests -L",
-                        `logoscore -D -m ./result/lib -l ${name} &`,
+                        `logoscore -D -m ./result/lib &`,
+                        `logoscore load-module ${name}`,
                         `logoscore call ${name} ${sampleCall}`,
                         "logoscore stop",
                       ]

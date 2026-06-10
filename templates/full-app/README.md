@@ -55,7 +55,8 @@ cd myapp-module && git init && git add -A && nix build
 lm ./result/lib/myapp_plugin.so
 
 # Test module (start a daemon, call via the client, then stop)
-logoscore -D -m ./result/lib -l myapp &
+logoscore -D -m ./result/lib &
+logoscore load-module myapp
 logoscore call myapp echo hello
 logoscore stop
 

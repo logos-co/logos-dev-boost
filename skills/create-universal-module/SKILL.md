@@ -220,7 +220,8 @@ logos_test(
 nix build .#unit-tests -L
 
 # Integration test via logoscore (start a daemon, then call via the client)
-logoscore -D -m ./result/lib -l <name> &
+logoscore -D -m ./result/lib &
+logoscore load-module <name>
 logoscore call <name> exampleMethod test
 logoscore stop
 ```

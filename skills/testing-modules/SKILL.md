@@ -202,12 +202,14 @@ LOGOS_TEST(method_emits_event) {
 
 ## Integration Tests with logoscore
 
-Test the module as a loaded plugin via the headless runtime. Start a daemon
-with the module(s) loaded, then call methods with the `call` client command:
+Test the module as a loaded plugin via the headless runtime. Start a clean daemon,
+load the module(s), then call methods with the `call` client command:
 
 ```bash
-# Start a daemon with the module(s) loaded (deps resolved automatically)
-logoscore -D -m ./result/lib -l my_module,other_module &
+# Start a clean daemon, then load the module(s) (deps resolved automatically)
+logoscore -D -m ./result/lib &
+logoscore load-module my_module
+logoscore load-module other_module
 
 # Call methods (positional args; @file reads a parameter from a file)
 logoscore call my_module doSomething test_input

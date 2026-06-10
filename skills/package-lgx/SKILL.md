@@ -68,7 +68,8 @@ lgpm --modules-dir ./test-modules info <name>
 ## Step 6: Test the Installed Package
 
 ```bash
-logoscore -D -m ./test-modules -l <name> &
+logoscore -D -m ./test-modules &
+logoscore load-module <name>
 logoscore call <name> someMethod test
 logoscore stop
 ```
