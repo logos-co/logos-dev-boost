@@ -29,17 +29,11 @@ Use this skill when:
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
-      preConfigure = ''
-        logos-cpp-generator --from-header src/my_module_impl.h \
-          --backend qt \
-          --impl-class MyModuleImpl \
-          --impl-header my_module_impl.h \
-          --metadata metadata.json \
-          --output-dir ./generated_code
-      '';
     };
 }
 ```
+
+No `preConfigure` is needed: when `metadata.json` declares `"interface": "universal"`, `mkLogosModule` runs the universal codegen pipeline (header → `.lidl` → cdylib glue) automatically before CMake.
 
 ## With Module Dependencies
 
@@ -74,12 +68,6 @@ outputs = inputs@{ logos-module-builder, ... }:
     externalLibInputs = {
       mylib = inputs.my-ext-lib;
     };
-    preConfigure = ''
-      logos-cpp-generator --from-header src/my_module_impl.h \
-        --backend qt --impl-class MyModuleImpl \
-        --impl-header my_module_impl.h \
-        --metadata metadata.json --output-dir ./generated_code
-    '';
   };
 ```
 

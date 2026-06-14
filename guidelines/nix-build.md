@@ -20,19 +20,11 @@ Never run raw `cmake` without `nix develop` or `ws develop`. The Nix build syste
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
-      preConfigure = ''
-        logos-cpp-generator --from-header src/<name>_impl.h \
-          --backend qt \
-          --impl-class <ImplClassName> \
-          --impl-header <name>_impl.h \
-          --metadata metadata.json \
-          --output-dir ./generated_code
-      '';
     };
 }
 ```
 
-The `preConfigure` hook runs the code generator before CMake. This is required for universal modules.
+No `preConfigure` is needed. When `metadata.json` declares `"interface": "universal"`, `mkLogosModule` runs the universal codegen pipeline (header → `.lidl` → cdylib glue) for you before CMake. See [codegen.md](codegen.md).
 
 ## Flake Structure for Modules with External Libraries
 
@@ -56,14 +48,10 @@ outputs = inputs@{ logos-module-builder, ... }:
     externalLibInputs = {
       mylib = inputs.my-lib;
     };
-    preConfigure = ''
-      logos-cpp-generator --from-header src/<name>_impl.h \
-        --backend qt --impl-class <ClassName> \
-        --impl-header <name>_impl.h \
-        --metadata metadata.json --output-dir ./generated_code
-    '';
   };
 ```
+
+The universal codegen still runs automatically — `externalLibInputs` only adds the external library to the build; it doesn't change the codegen pipeline.
 
 ## Build Commands
 

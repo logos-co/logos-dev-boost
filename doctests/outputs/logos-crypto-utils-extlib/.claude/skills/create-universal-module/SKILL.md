@@ -123,12 +123,12 @@ logos_module(
     SOURCES
         src/<name>_impl.h
         src/<name>_impl.cpp
-        generated_code/<name>_qt_glue.h
-        generated_code/<name>_dispatch.cpp
     INCLUDE_DIRS
         ${CMAKE_CURRENT_SOURCE_DIR}/generated_code
 )
 ```
+
+Do **not** list `generated_code/` files in `SOURCES` — `LogosModule.cmake` globs them automatically.
 
 ## Step 6: Create flake.nix
 
@@ -146,17 +146,11 @@ logos_module(
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
-      preConfigure = ''
-        logos-cpp-generator --from-header src/<name>_impl.h \
-          --backend qt \
-          --impl-class <ImplClassName> \
-          --impl-header <name>_impl.h \
-          --metadata metadata.json \
-          --output-dir ./generated_code
-      '';
     };
 }
 ```
+
+No `preConfigure` is needed. Because `metadata.json` sets `"interface": "universal"`, `mkLogosModule` runs the universal codegen pipeline (header → `.lidl` → cdylib glue) automatically before CMake.
 
 ## Step 7: Build
 
@@ -219,8 +213,11 @@ logos_test(
 # Unit tests (direct impl class testing, no logoscore needed)
 nix build .#unit-tests -L
 
-# Integration test via logoscore
-logoscore -m ./result/lib -l <name> -c "<name>.exampleMethod(test)"
+# Integration test via logoscore (start a daemon, then call via the client)
+logoscore -D -m ./result/lib &
+logoscore load-module <name>
+logoscore call <name> exampleMethod test
+logoscore stop
 ```
 
 For mocking other modules or C libraries in tests, see the `testing-modules` skill.

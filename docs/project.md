@@ -84,7 +84,7 @@ Guidelines are Markdown files loaded into the always-on context (AGENTS.md / CLA
 | `nix-build.md` | Flake structure, `follows` declarations, `preConfigure` for codegen, build commands, `--auto-local` |
 | `testing.md` | Unit tests (call impl class directly), logoscore integration tests, `TEST_GROUPS`, `nix flake check` |
 | `metadata-json.md` | Full schema including `"interface"`, `"dependencies"`, `"nix"` config, `"external_libraries"`, `"cmake"` settings |
-| `codegen.md` | `logos-cpp-generator --from-header` pipeline, C++ to LIDL to Qt type mapping, generated file structure, LIDL format |
+| `codegen.md` | header-first cdylib pipeline, C++ to LIDL type mapping, generated file structure, LIDL format |
 
 ### Skills
 

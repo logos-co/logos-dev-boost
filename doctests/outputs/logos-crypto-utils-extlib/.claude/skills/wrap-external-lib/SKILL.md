@@ -70,14 +70,10 @@ outputs = inputs@{ logos-module-builder, ... }:
     externalLibInputs = {
       mylib = inputs.my-lib;
     };
-    preConfigure = ''
-      logos-cpp-generator --from-header src/my_module_impl.h \
-        --backend qt --impl-class MyModuleImpl \
-        --impl-header my_module_impl.h \
-        --metadata metadata.json --output-dir ./generated_code
-    '';
   };
 ```
+
+No `preConfigure` is needed — `mkLogosModule` runs the universal codegen automatically. `externalLibInputs` only adds the external library to the build.
 
 The `externalLibInputs` key must match the `name` in `external_libraries`. The module builder copies built library binaries to `lib/`.
 
@@ -117,8 +113,6 @@ logos_module(
     SOURCES
         src/my_module_impl.h
         src/my_module_impl.cpp
-        generated_code/my_module_qt_glue.h
-        generated_code/my_module_dispatch.cpp
     FIND_PACKAGES
         Threads
     LINK_LIBRARIES

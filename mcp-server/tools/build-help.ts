@@ -145,11 +145,11 @@ function buildHelp(project: { isUniversal: boolean; isFullApp: boolean; name: st
 
   if (project.isUniversal) {
     lines.push("\n### Universal Module Build Pipeline\n");
-    lines.push("This is a universal C++ module. The build process:");
-    lines.push("1. `preConfigure` runs `logos-cpp-generator --from-header`");
-    lines.push("2. Generator reads `src/" + project.name + "_impl.h` and `metadata.json`");
-    lines.push("3. Generator produces `generated_code/" + project.name + "_qt_glue.h` and `" + project.name + "_dispatch.cpp`");
-    lines.push("4. CMake compiles your impl + generated code into a Qt plugin");
+    lines.push("This is a universal C++ module (a header-first cdylib). The build process:");
+    lines.push("1. `mkLogosModule` runs the universal codegen automatically (no `preConfigure`)");
+    lines.push("2. Generator derives `generated_code/" + project.name + ".lidl` from `src/" + project.name + "_impl.h` + `metadata.json`");
+    lines.push("3. Generator produces `generated_code/" + project.name + "_cdylib_glue.{h,cpp}` (Qt-plugin glue) and `" + project.name + "_module_impl.cpp` (Qt-free C-ABI export wrapper)");
+    lines.push("4. CMake globs `generated_code/` and compiles your impl + generated code into a Qt plugin");
     lines.push("\n**Important:** Your source code must be pure C++ (std::string, int64_t, etc.). No Qt types.");
   }
 
@@ -338,11 +338,10 @@ function troubleshoot(error: string, project: { isUniversal: boolean; name: stri
     lines.push("```cmake");
     lines.push("configure_file(${CMAKE_CURRENT_SOURCE_DIR}/metadata.json ${CMAKE_CURRENT_BINARY_DIR}/metadata.json COPYONLY)");
     lines.push("```");
-  } else if (errorLower.includes("qt_glue") || errorLower.includes("dispatch.cpp") || errorLower.includes("generated_code")) {
-    lines.push("**Fix:** The code generator hasn't run. Check that `preConfigure` in flake.nix runs:");
-    lines.push("```bash");
-    lines.push(`logos-cpp-generator --from-header src/${project.name}_impl.h --backend qt --impl-class ${project.name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("")}Impl --impl-header ${project.name}_impl.h --metadata metadata.json --output-dir ./generated_code`);
-    lines.push("```");
+  } else if (errorLower.includes("cdylib_glue") || errorLower.includes("module_impl") || errorLower.includes("qt_glue") || errorLower.includes("dispatch.cpp") || errorLower.includes("generated_code")) {
+    lines.push("**Fix:** A `generated_code/` file wasn't found. Two common causes:");
+    lines.push("1. Your `CMakeLists.txt` lists `generated_code/*` files in `SOURCES`. Don't — `LogosModule.cmake` globs them automatically. List only `src/" + project.name + "_impl.{h,cpp}`.");
+    lines.push("2. `metadata.json` is missing `\"interface\": \"universal\"`, so `mkLogosModule` didn't run the codegen. The universal codegen runs automatically (no `preConfigure`) when the interface is universal.");
   } else if (errorLower.includes("find_package") || errorLower.includes("could not find")) {
     lines.push("**Fix:** Add the missing package to metadata.json `nix.cmake.find_packages` and `nix.packages.runtime`.");
   } else if (errorLower.includes("/nix/store")) {

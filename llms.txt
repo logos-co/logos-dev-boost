@@ -20,6 +20,7 @@
 
 ## Skills
 - [add-to-workspace](skills/add-to-workspace/SKILL.md): Activate when registering a new module in the logos-workspace. Covers adding git submodules, flake.nix inputs with follows declarations, scripts/ws REPOS array, repo groups, and dep-graph.nix regeneration.
+- [create-full-app](skills/create-full-app/SKILL.md): Create a Logos full app — a combined module + UI app project in a single root directory
 - [create-ui-app](skills/create-ui-app/SKILL.md): Activate when creating a Logos Basecamp UI app. Covers two subtypes — pure QML (no C++) and QML + process-isolated C++ backend with Qt Remote Objects.
 - [create-universal-module](skills/create-universal-module/SKILL.md): Activate when creating a new Logos module with the universal C++ interface. Covers scaffolding, metadata.json, flake.nix with code generator, CMakeLists.txt, and the pure C++ impl header.
 - [inter-module-comm](skills/inter-module-comm/SKILL.md): Activate when implementing inter-module communication in Logos. Covers LogosAPI::callModule(), LogosResult handling, dependency declaration in metadata.json, generated client stubs, and the QML bridge.

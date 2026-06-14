@@ -166,11 +166,11 @@ function generateAgentsMd(projectDir: string, boostDir: string): string {
   if (project.interface === "universal") {
     lines.push("### Universal Module Build Pipeline");
     lines.push("");
-    lines.push("This is a universal C++ module. The build pipeline is:");
-    lines.push("1. `preConfigure` in flake.nix runs `logos-cpp-generator --from-header`");
-    lines.push("2. Generator reads the pure C++ impl header and metadata.json");
-    lines.push("3. Generator produces `generated_code/*_qt_glue.h` and `*_dispatch.cpp`");
-    lines.push("4. CMake compiles everything into a Qt plugin `.so`/`.dylib`");
+    lines.push("This is a universal C++ module (a header-first cdylib). The build pipeline is:");
+    lines.push("1. `mkLogosModule` runs the universal codegen automatically (no `preConfigure`)");
+    lines.push("2. Generator derives `generated_code/<name>.lidl` from the pure C++ impl header");
+    lines.push("3. Generator produces `generated_code/*_cdylib_glue.{h,cpp}` (Qt-plugin glue) and `*_module_impl.cpp` (Qt-free C-ABI export wrapper)");
+    lines.push("4. CMake globs `generated_code/` and compiles everything into a Qt plugin `.so`/`.dylib`");
     lines.push("");
     lines.push("Your code is pure C++ (std::string, int64_t, etc). The generator handles all Qt types.");
     lines.push("");
