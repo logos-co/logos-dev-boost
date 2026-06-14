@@ -561,9 +561,7 @@ logos_module(
     NAME ${name}
     SOURCES
         src/${name}_impl.h
-        src/${name}_impl.cpp
-        generated_code/${name}_qt_glue.h
-        generated_code/${name}_dispatch.cpp${hasCSources ? "\n" + cSourceLines : ""}
+        src/${name}_impl.cpp${hasCSources ? "\n" + cSourceLines : ""}
     INCLUDE_DIRS
         \${CMAKE_CURRENT_SOURCE_DIR}/generated_code${extIncDirs}${extLibsCmake}
 )
