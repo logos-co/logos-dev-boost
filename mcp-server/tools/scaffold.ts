@@ -586,14 +586,6 @@ logos_module(
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
-      preConfigure = ''
-        logos-cpp-generator --from-header src/${name}_impl.h \\
-          --backend qt \\
-          --impl-class ${pascal}Impl \\
-          --impl-header ${name}_impl.h \\
-          --metadata metadata.json \\
-          --output-dir ./generated_code
-      '';
     };
 }
 `,
