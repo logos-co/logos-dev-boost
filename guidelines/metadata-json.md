@@ -47,7 +47,7 @@
 |-------|-------|-------------|
 | `interface` | `"universal"` | Signals that this module uses pure C++ impl + code generation |
 
-When `"interface": "universal"` is set, the build system expects `logos-cpp-generator --from-header` to run in `preConfigure` and produce Qt glue files.
+When `"interface": "universal"` is set, `mkLogosModule` automatically runs the universal codegen pipeline (header → `.lidl` → cdylib glue) before CMake — no `preConfigure` needed. See [codegen.md](codegen.md).
 
 ## Dependencies
 

@@ -18,10 +18,10 @@ logos-dev-boost addresses this by operating at three levels:
 
 | Term | Definition |
 |------|------------|
-| **Universal Module** | A Logos module whose implementation is pure C++ (no Qt types). All Qt glue is generated at build time by `logos-cpp-generator --from-header`. Identified by `"interface": "universal"` in metadata.json. |
+| **Universal Module** | A Logos module whose implementation is pure C++ (no Qt types). All Qt glue is generated at build time by the header-first cdylib pipeline. Identified by `"interface": "universal"` in metadata.json. |
 | **UI App** | A QML-based UI component displayed as a tab in Basecamp's MDI workspace. Either pure QML (calls backend modules via `logos.callModule()`) or QML + process-isolated C++ backend (Qt Remote Objects). Identified by `"type": "ui_qml"` in metadata.json. |
-| **LIDL** | Logos Interface Definition Language — a lightweight DSL for declaring module interfaces. Alternative to the `--from-header` C++ parser path. Both produce identical generated output. |
-| **Provider Glue** | Generated code (`_qt_glue.h`, `_dispatch.cpp`) that wraps a pure C++ implementation class in a `LogosProviderObject` with `callMethod()` dispatch and `getMethods()` introspection. |
+| **LIDL** | Logos Interface Definition Language — a lightweight DSL for declaring module interfaces. The universal pipeline derives a `.lidl` from your C++ header automatically; you can also hand-write one (the `cdylib` interface). Both produce identical generated output. |
+| **Provider Glue** | Generated code (`_cdylib_glue.{h,cpp}`, `_module_impl.cpp`) that wraps a pure C++ implementation class: a uniform Qt-plugin glue over the common module-impl C ABI, plus a Qt-free C-ABI export wrapper. |
 | **Client Stub** | Generated type-safe C++ wrapper class that callers use to invoke a module's methods without string-based dispatch. |
 | **LogosAPI** | The runtime API that modules use to call other modules. Provides `callModule(name, method, args)` which returns a `LogosResult`. |
 | **LogosResult** | Structured return type for cross-module calls. Contains `success()`, `data()` (QVariant), and `errorMessage()`. |
@@ -37,9 +37,9 @@ logos-dev-boost addresses this by operating at three levels:
 
 This distinction is fundamental to the entire Logos ecosystem and to everything logos-dev-boost teaches:
 
-**Logos Modules (core)** are process-isolated backend services. The developer writes a plain C++ implementation class using standard types (`std::string`, `int64_t`, `std::vector<T>`, `bool`). No Qt types appear in user code. The build system runs `logos-cpp-generator --from-header` to generate all Qt glue: the plugin class, method dispatch table, and introspection metadata. Modules are loaded by `logoscore` (headless) or `logos-basecamp` (GUI) via `liblogos_core`. Each runs in its own isolated `logos_host` process and communicates via Qt Remote Objects IPC.
+**Logos Modules (core)** are process-isolated backend services. The developer writes a plain C++ implementation class using standard types (`std::string`, `int64_t`, `std::vector<T>`, `bool`). No Qt types appear in user code. The build system runs the universal codegen pipeline (header → `.lidl` → cdylib glue) to generate all Qt glue: the uniform Qt-plugin glue and a Qt-free C-ABI export wrapper around your class. Modules are loaded by `logoscore` (headless) or `logos-basecamp` (GUI) via `liblogos_core`. Each runs in its own isolated `logos_host` process and communicates via Qt Remote Objects IPC.
 
-Reference implementation: `logos-accounts-module` — `metadata.json` has `"interface": "universal"`, `src/accounts_module_impl.h` is pure C++, `flake.nix` runs the code generator in `preConfigure`.
+Reference implementation: `logos-accounts-module` — `metadata.json` has `"interface": "universal"`, `src/accounts_module_impl.h` is pure C++, and `mkLogosModule` runs the universal codegen automatically (no `preConfigure`).
 
 **UI Apps** (`"type": "ui_qml"`) are QML-based UI components displayed as tabs in Basecamp's MDI workspace. Two subtypes exist: pure QML apps (no C++, call backend modules via `logos.callModule()`) and QML + C++ backend apps (process-isolated C++ backend communicating via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
@@ -49,8 +49,8 @@ Reference implementation: `logos-accounts-module` — `metadata.json` has `"inte
 User writes:       Pure C++ impl header                 QML (pure) or QML + .rep + C++ plugin
                    (std::string, int64_t, etc.)         (Qt types OK in backend)
 
-Generated:         Qt glue, dispatch, plugin class      QTRO source/replica (from .rep)
-                   (logos-cpp-generator --from-header)
+Generated:         .lidl + cdylib glue + plugin class   QTRO source/replica (from .rep)
+                   (header-first cdylib pipeline)
 
 metadata.json:     "interface": "universal"             "type": "ui_qml"
                    "type": "core"                       "view": "Main.qml"
@@ -76,8 +76,10 @@ The code generator maps C++ standard types to LIDL types to Qt types:
 | `std::vector<uint8_t>` | `bstr` | `QByteArray` |
 | `std::vector<int64_t>` | `[int]` | `QVariantList` |
 | `std::vector<bool>` | `[bool]` | `QVariantList` |
+| `LogosMap` | `{tstr: any}` | `QVariantMap` |
+| `LogosList` | `[any]` | `QVariantList` |
 
-Module authors only work with the C++ column. The generator handles everything else.
+Module authors only work with the C++ column. The generator handles everything else. `LogosMap`/`LogosList` (from `<logos_json.h>`) are `nlohmann::json` aliases for returning rich structured data while keeping the impl Qt-free.
 
 ### How logos-dev-boost Layers Work Together
 
@@ -123,8 +125,8 @@ crypto_utils/
 │   ├── crypto_utils_impl.h       # Pure C++ class (std::string, bool, etc.)
 │   └── crypto_utils_impl.cpp     # Implementation stubs
 ├── metadata.json                 # "interface": "universal", "type": "core"
-├── CMakeLists.txt                # logos_module() with generated_code sources
-├── flake.nix                     # preConfigure runs logos-cpp-generator --from-header
+├── CMakeLists.txt                # logos_module() — generated_code globbed automatically
+├── flake.nix                     # mkLogosModule (universal codegen runs automatically)
 ├── tests/
 │   ├── main.cpp                  # LOGOS_TEST_MAIN() entry point
 │   ├── test_crypto_utils.cpp     # Unit tests using LOGOS_TEST() and assertions
@@ -159,18 +161,20 @@ No `Q_OBJECT`, no `Q_INVOKABLE`, no `QString`. The code generator handles all Qt
 nix build
 ```
 
-The generator runs automatically via `preConfigure` in `flake.nix`:
+The codegen runs automatically — `mkLogosModule` invokes the universal pipeline (you write no `preConfigure`). It derives a `.lidl` from the impl header, then emits the Qt-plugin glue and a Qt-free C-ABI export wrapper:
 
 ```bash
-logos-cpp-generator --from-header src/crypto_utils_impl.h \
-  --backend qt \
-  --impl-class CryptoUtilsImpl \
-  --impl-header crypto_utils_impl.h \
-  --metadata metadata.json \
+logos-cpp-generator --header-to-lidl src/crypto_utils_impl.h \
+  --impl-class CryptoUtilsImpl --metadata metadata.json \
+  -o ./generated_code/crypto_utils.lidl
+logos-qt-generator  --lidl ./generated_code/crypto_utils.lidl --backend cdylib \
+  --output-dir ./generated_code
+logos-cpp-generator --lidl ./generated_code/crypto_utils.lidl --backend cdylib \
+  --impl-class CryptoUtilsImpl --impl-header crypto_utils_impl.h \
   --output-dir ./generated_code
 ```
 
-This produces `generated_code/crypto_utils_qt_glue.h` and `generated_code/crypto_utils_dispatch.cpp` containing the Qt plugin class, method dispatch, and introspection metadata.
+This produces `generated_code/crypto_utils.lidl`, `crypto_utils_cdylib_glue.{h,cpp}` (uniform Qt-plugin glue), and `crypto_utils_module_impl.cpp` (Qt-free C-ABI export wrapper). `LogosModule.cmake` globs these automatically — you don't list them in `CMakeLists.txt`.
 
 **Step 4: Test with logoscore**
 
@@ -442,11 +446,11 @@ What happens when a developer tells an AI agent "create a module that provides e
 
 1. Agent reads AGENTS.md (always loaded) — knows about universal interface, Logos ecosystem, type system, build pipeline. This is the critical difference from not having logos-dev-boost.
 
-2. Agent activates `create-universal-module` skill — gets step-by-step template with correct file structure, `metadata.json` schema, `flake.nix` pattern with `preConfigure`.
+2. Agent activates `create-universal-module` skill — gets step-by-step template with correct file structure, `metadata.json` schema, and the `mkLogosModule` `flake.nix` pattern (universal codegen runs automatically).
 
 3. Agent writes pure C++ impl header — guidelines ensure it uses `std::string` not `QString`, `int64_t` not `int`, returns meaningful types from the type mapping table.
 
-4. Agent writes `flake.nix` — skill provides exact template with `logos-cpp-generator --from-header` in `preConfigure` and correct `logos-module-builder` input.
+4. Agent writes `flake.nix` — skill provides the exact `mkLogosModule` template (universal codegen runs automatically; no `preConfigure`) with the correct `logos-module-builder` input.
 
 5. Agent builds with `nix build` — build-help guidelines explain the pipeline. If errors occur, agent knows common fixes: generator type mapping issues, missing `find_package`, `metadata.json`/header class name mismatch.
 
@@ -631,7 +635,7 @@ Guidelines are Markdown files loaded into the always-on context (AGENTS.md / CLA
 | `nix-build.md` | Flake structure, `follows` declarations, `preConfigure` for codegen, build commands, `--auto-local` |
 | `testing.md` | Unit tests (call impl class directly), logoscore integration tests, `TEST_GROUPS`, `nix flake check` |
 | `metadata-json.md` | Full schema including `"interface"`, `"dependencies"`, `"nix"` config, `"external_libraries"`, `"cmake"` settings |
-| `codegen.md` | `logos-cpp-generator --from-header` pipeline, C++ to LIDL to Qt type mapping, generated file structure, LIDL format |
+| `codegen.md` | header-first cdylib pipeline, C++ to LIDL type mapping, generated file structure, LIDL format |
 
 ### Skills
 
@@ -798,72 +802,97 @@ This means logos-dev-boost always uses the latest logos-module-builder templates
 
 `logos-cpp-generator` bridges pure C++ module implementations to the Logos runtime's Qt plugin system. Module authors write standard C++ and the generator produces all Qt boilerplate automatically.
 
-## The --from-header Pipeline
+Universal modules are **header-first cdylibs**: the generator derives a LIDL contract from your impl header, then emits a Qt-free cdylib (exporting the common module-impl C ABI) wrapped by a uniform Qt-plugin glue that `logos_host` loads unchanged. Your module's own translation units stay Qt-free — Qt appears only in the generated glue.
 
-This is the primary mode for universal modules:
+## The universal pipeline
+
+This is how universal modules are built. You write only the impl class; `logos-module-builder` runs every step below for you in `preConfigure` (see [In flake.nix](#in-flakenix)).
 
 ```
 C++ impl header (your code)
        │
-       ▼
+       ▼  logos-cpp-generator --header-to-lidl
 parseImplHeader() — extracts public methods, maps C++ types to LIDL types
        │
        ▼
-ModuleDecl (internal AST)
+<name>.lidl (derived interface contract; also the events sidecar dependents consume)
        │
-       ├──► <name>_qt_glue.h      — Plugin class + ProviderObject with typed wrappers
+       ├──► logos-qt-generator --lidl --backend cdylib
+       │        └──► <name>_cdylib_glue.h / <name>_cdylib_glue.cpp
+       │             — uniform Qt-plugin glue over the module-impl C ABI
        │
-       └──► <name>_dispatch.cpp    — callMethod() dispatch + getMethods() metadata
+       └──► logos-cpp-generator --lidl --backend cdylib
+                └──► <name>_module_impl.cpp
+                     — Qt-free C-ABI export wrapper around your impl class
 ```
 
-### Command
+### Commands
 
 ```bash
-logos-cpp-generator --from-header src/<name>_impl.h \
-  --backend qt \
+# 1. Derive the LIDL contract from your impl header.
+logos-cpp-generator --header-to-lidl src/<name>_impl.h \
+  --impl-class <ImplClassName> \
+  --metadata metadata.json \
+  -o ./generated_code/<name>.lidl
+
+# 2. Generate the uniform Qt-plugin glue (logos_host loads it unchanged).
+logos-qt-generator --lidl ./generated_code/<name>.lidl \
+  --backend cdylib \
+  --output-dir ./generated_code
+
+# 3. Generate the Qt-free C-ABI export wrapper (+ typed event emitters)
+#    around your hand-written impl class.
+logos-cpp-generator --lidl ./generated_code/<name>.lidl \
+  --backend cdylib \
   --impl-class <ImplClassName> \
   --impl-header <name>_impl.h \
-  --metadata metadata.json \
   --output-dir ./generated_code
 ```
 
+You never run these by hand — `mkLogosModule` invokes them automatically when `metadata.json` declares `"interface": "universal"`.
+
 | Flag | Description |
 |------|-------------|
-| `--from-header <path>` | Path to the pure C++ impl header |
-| `--backend qt` | Generate Qt plugin glue (currently the only backend) |
-| `--impl-class <name>` | Name of the C++ implementation class (PascalCase + Impl) |
+| `--header-to-lidl <path>` | Path to the pure C++ impl header to derive the LIDL contract from |
+| `--lidl <path>` | Path to a `.lidl` contract (steps 2 & 3 consume the file emitted by step 1) |
+| `--backend cdylib` | Emit the cdylib module-impl C ABI artifacts (glue + export wrapper) |
+| `--impl-class <name>` | Name of the C++ implementation class (PascalCase + `Impl`) |
 | `--impl-header <name>` | Header filename (for include directives in generated code) |
 | `--metadata <path>` | Path to metadata.json (provides name, version, description) |
-| `--output-dir <path>` | Directory for generated files |
+| `-o <path>` / `--output-dir <path>` | Output `.lidl` file (step 1) / directory for generated files (steps 2 & 3) |
 
 ### Generated Files
 
-**`<name>_qt_glue.h`** — Contains two classes:
-1. **ProviderObject** — Inherits `LogosProviderBase`. Holds `m_impl` (your impl class). Each public method gets a typed wrapper that converts Qt params to C++ std params, calls `m_impl.method(...)`, and converts the return value back.
-2. **Plugin** — `QObject` subclass with `Q_PLUGIN_METADATA` and `Q_INTERFACES`. Factory method `createProviderObject()` returns a new ProviderObject.
+All land in `generated_code/`. Don't edit them and don't list them in `CMakeLists.txt` — `LogosModule.cmake` globs them automatically (see [In CMakeLists.txt](#in-cmakeliststxt)).
 
-**`<name>_dispatch.cpp`** — Implements two methods on the ProviderObject:
-1. `callMethod(methodName, args)` — String-based dispatch table mapping method names to typed calls
-2. `getMethods()` — Returns `QJsonArray` of method metadata (name, signature, returnType, parameters)
+**`<name>.lidl`** — the interface contract derived from your impl header. Doubles as the published events sidecar that dependents' typed-event codegen consumes.
+
+**`<name>_cdylib_glue.h` / `<name>_cdylib_glue.cpp`** — the uniform Qt-plugin glue. A `QObject` subclass with `Q_PLUGIN_METADATA` + `Q_INTERFACES` and a `LogosProviderObject` that marshals method calls to JSON and forwards them to the cdylib's module-impl C ABI (`dispatch` / `getMethods` / `set_context` / emit callback / `accept_token`). The glue is identical regardless of the module's source language — it only knows the C ABI.
+
+**`<name>_module_impl.cpp`** — the Qt-free C-ABI export wrapper. Implements the common module-impl C ABI (`logos_module_impl.h`) around your hand-written impl class, plus typed event emitters. This translation unit links no Qt; it is what makes a universal module a cdylib.
 
 ### Type Mapping Table
 
-| C++ type | LIDL type | Qt mapping |
-|----------|-----------|------------|
-| `std::string` / `const std::string&` | `tstr` | `QString` |
-| `bool` | `bool` | `bool` |
-| `int64_t` | `int` | `int` |
-| `uint64_t` | `uint` | `int` |
-| `double` | `float64` | `double` |
-| `void` | `void` | `void` |
-| `std::vector<std::string>` | `[tstr]` | `QStringList` |
-| `std::vector<uint8_t>` | `bstr` | `QByteArray` |
-| `std::vector<int64_t>` | `[int]` | `QVariantList` |
-| Anything else | `any` | `QVariant` |
+| C++ type | LIDL type | JSON / wire |
+|----------|-----------|-------------|
+| `std::string` / `const std::string&` | `tstr` | string |
+| `bool` | `bool` | bool |
+| `int64_t` | `int` | number |
+| `uint64_t` | `uint` | number |
+| `double` | `float64` | number |
+| `void` | `void` | — |
+| `std::vector<std::string>` | `[tstr]` | array of string |
+| `std::vector<uint8_t>` | `bstr` | `{"_bytes":"<base64url>"}` |
+| `std::vector<int64_t>` | `[int]` | array of number |
+| `LogosMap` | `{tstr: any}` | object |
+| `LogosList` | `[any]` | array |
+| Anything else | `any` | any |
 
-## LIDL (Alternative Input Format)
+`LogosMap` and `LogosList` (from `<logos_json.h>`) are `nlohmann::json` aliases for returning structured data without Qt. The generator sets a `jsonReturn` flag on these methods so the dispatch layer carries the JSON through faithfully.
 
-LIDL is a lightweight Interface Definition Language. Instead of parsing a C++ header, you write a `.lidl` file:
+## LIDL (define the contract first)
+
+LIDL is a lightweight Interface Definition Language. The universal pipeline derives a `.lidl` from your header automatically (step 1 above), but you can also hand-write one to define the interface before the implementation:
 
 ```
 module crypto_utils {
@@ -877,16 +906,18 @@ module crypto_utils {
 }
 ```
 
-Both paths (C++ header and LIDL) produce identical generated output. Use `--from-header` for most modules; use LIDL when you want to define the interface before writing the implementation.
+A hand-written `.lidl` feeds steps 2 & 3 directly (this is the `cdylib` interface; the `universal` interface just derives the `.lidl` from your header first). Both routes produce identical generated output.
 
 ## Common Issues
 
-- **Unknown type warning**: If the generator encounters a C++ type not in the mapping table, it maps to `any` (`QVariant`). Prefer explicit types from the table.
+- **Unknown type warning**: If the generator encounters a C++ type not in the mapping table, it maps to `any`. Prefer explicit types from the table.
 - **Class not found**: `--impl-class` must exactly match the class name in the header (case-sensitive).
 - **metadata.json mismatch**: The `name` in metadata.json must match the expected plugin binary name.
-- **Generated files not found by CMake**: Ensure `generated_code/` files are listed in `CMakeLists.txt` SOURCES and the directory is in INCLUDE_DIRS.
+- **Generated files not found by CMake**: You do *not* list `generated_code/` files in `SOURCES` — `LogosModule.cmake` globs them. Just make sure `generated_code` is in `INCLUDE_DIRS`.
 
 ## In CMakeLists.txt
+
+List only your own sources. `LogosModule.cmake` globs `generated_code/*.cpp` and `*.h` automatically (excluding `logos_sdk`/`*_api`), so the generated glue is picked up without being named:
 
 ```cmake
 logos_module(
@@ -894,8 +925,6 @@ logos_module(
     SOURCES
         src/my_module_impl.h
         src/my_module_impl.cpp
-        generated_code/my_module_qt_glue.h
-        generated_code/my_module_dispatch.cpp
     INCLUDE_DIRS
         ${CMAKE_CURRENT_SOURCE_DIR}/generated_code
 )
@@ -903,15 +932,22 @@ logos_module(
 
 ## In flake.nix
 
-The generator runs in `preConfigure`, before CMake:
+You don't write a `preConfigure` — `mkLogosModule` runs the universal pipeline for you when `metadata.json` sets `"interface": "universal"`:
 
 ```nix
-preConfigure = ''
-  logos-cpp-generator --from-header src/my_module_impl.h \
-    --backend qt --impl-class MyModuleImpl \
-    --impl-header my_module_impl.h \
-    --metadata metadata.json --output-dir ./generated_code
-'';
+{
+  inputs = {
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
+    nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
+  };
+
+  outputs = inputs@{ logos-module-builder, ... }:
+    logos-module-builder.lib.mkLogosModule {
+      src = ./.;
+      configFile = ./metadata.json;
+      flakeInputs = inputs;
+    };
+}
 ```
 
 
@@ -927,7 +963,36 @@ Logos has two fundamentally different types of components. Always identify which
 
 **UI Apps** (`"type": "ui_qml"`) — QML-based UI apps displayed as tabs in Basecamp's MDI workspace. Two subtypes: pure QML (no C++, calls modules via `logos.callModule()`) or QML + C++ backend (process-isolated via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 
-**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, ui_qml). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it, or use a QML + backend app.
+**Rule:** Never mix these. A module is either core (headless, universal interface) or UI (visual, ui_qml). If something needs both backend logic and a UI, create a core module for the logic and a separate UI app that calls it, or use a QML + backend app. The `full-app` scaffold type does exactly this — it creates a `module/` subdirectory (core) and a `ui/` subdirectory (UI app) with a shared root.
+
+## Full App Layout
+
+When a project requires both a module and a UI, use the `full-app` layout:
+
+```
+logos-<name>/                      # Open this in your IDE
+  <name>-module/                   # Universal C++ module (core backend)
+    metadata.json                  # "type": "core", "interface": "universal"
+    flake.nix                      # standalone — cd <name>-module && nix build
+    src/<name>_impl.h
+    src/<name>_impl.cpp
+  <name>-ui/                       # Basecamp UI app (frontend)
+    metadata.json                  # "type": "ui_qml", "dependencies": ["<name>"]
+    flake.nix                      # includes <name>.url = "path:../<name>-module"
+    src/<name>_ui_plugin.h/cpp
+    src/<Pascal>UiBackend.h/cpp
+    src/qml/Main.qml
+  project.json                     # { "type": "full-app", "name": "<name>" }
+  AGENTS.md / CLAUDE.md / .mcp.json
+```
+
+Scaffold with: `logos-dev-boost init <name> --type full-app`
+
+Each sub-project is a standalone flake — build inside the sub-directory:
+```bash
+cd <name>-module && git init && git add -A && nix build
+cd ../<name>-ui && git init && git add -A && nix build
+```
 
 ## Module Naming
 
@@ -1040,7 +1105,7 @@ Always handle the case where a target module is not loaded. Always declare depen
 |-------|-------|-------------|
 | `interface` | `"universal"` | Signals that this module uses pure C++ impl + code generation |
 
-When `"interface": "universal"` is set, the build system expects `logos-cpp-generator --from-header` to run in `preConfigure` and produce Qt glue files.
+When `"interface": "universal"` is set, `mkLogosModule` automatically runs the universal codegen pipeline (header → `.lidl` → cdylib glue) before CMake — no `preConfigure` needed. See [codegen.md](codegen.md).
 
 ## Dependencies
 
@@ -1141,19 +1206,11 @@ Never run raw `cmake` without `nix develop` or `ws develop`. The Nix build syste
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
-      preConfigure = ''
-        logos-cpp-generator --from-header src/<name>_impl.h \
-          --backend qt \
-          --impl-class <ImplClassName> \
-          --impl-header <name>_impl.h \
-          --metadata metadata.json \
-          --output-dir ./generated_code
-      '';
     };
 }
 ```
 
-The `preConfigure` hook runs the code generator before CMake. This is required for universal modules.
+No `preConfigure` is needed. When `metadata.json` declares `"interface": "universal"`, `mkLogosModule` runs the universal codegen pipeline (header → `.lidl` → cdylib glue) for you before CMake. See [codegen.md](codegen.md).
 
 ## Flake Structure for Modules with External Libraries
 
@@ -1177,14 +1234,10 @@ outputs = inputs@{ logos-module-builder, ... }:
     externalLibInputs = {
       mylib = inputs.my-lib;
     };
-    preConfigure = ''
-      logos-cpp-generator --from-header src/<name>_impl.h \
-        --backend qt --impl-class <ClassName> \
-        --impl-header <name>_impl.h \
-        --metadata metadata.json --output-dir ./generated_code
-    '';
   };
 ```
+
+The universal codegen still runs automatically — `externalLibInputs` only adds the external library to the build; it doesn't change the codegen pipeline.
 
 ## Build Commands
 
@@ -1851,10 +1904,10 @@ The builder runs headless (`QT_QPA_PLATFORM=offscreen`), connects to the QML ins
 
 ## The Universal Interface Pattern
 
-Universal modules use **pure C++** for their implementation. You write a single implementation class using standard C++ types. The build system generates all Qt/plugin infrastructure automatically via `logos-cpp-generator --from-header`.
+Universal modules use **pure C++** for their implementation. You write a single implementation class using standard C++ types. The build system generates all Qt/plugin infrastructure automatically — universal modules are **header-first cdylibs** (see [codegen.md](codegen.md)).
 
 **You write:** A C++ class with `std::string`, `int64_t`, `bool`, `std::vector<T>`.
-**The generator produces:** Qt plugin class, method dispatch, introspection metadata.
+**The generator produces:** a derived `.lidl` contract, the uniform Qt-plugin glue, and a Qt-free C-ABI export wrapper around your class — so your code never touches Qt.
 
 ## Rules
 
@@ -1881,8 +1934,31 @@ Universal modules use **pure C++** for their implementation. You write a single 
 | `std::vector<int64_t>` | `[int]` | `QVariantList` |
 | `std::vector<double>` | `[float64]` | `QVariantList` |
 | `std::vector<bool>` | `[bool]` | `QVariantList` |
+| `LogosMap` | `{tstr: any}` | `QVariantMap` |
+| `LogosList` | `[any]` | `QVariantList` |
+
+`LogosMap` and `LogosList` (from `<logos_json.h>`) are aliases for `nlohmann::json`. Use them when you need to return structured objects or arrays while keeping your impl Qt-free. The generator automatically converts them to `QVariantMap`/`QVariantList` in the glue layer.
 
 If you use a type not in this table, the generator maps it to `any` (`QVariant`). Prefer explicit types from the table for type safety.
+
+## Emitting Events
+
+To emit events from your module, declare a public `emitEvent` callback in your impl header:
+
+```cpp
+#include <functional>
+std::function<void(const std::string& eventName, const std::string& data)> emitEvent;
+```
+
+The generator detects this automatically and wires it to the Logos event system. Call it from your implementation:
+
+```cpp
+if (emitEvent) {
+    emitEvent("somethingHappened", someData);
+}
+```
+
+No `events` array in `metadata.json` is needed — the generator infers everything from the header.
 
 ## Impl Header Template
 
@@ -1909,18 +1985,20 @@ private:
 
 ## Build Pipeline
 
-The `flake.nix` `preConfigure` hook runs the generator before CMake:
+You don't write a `preConfigure` or run the generator — `mkLogosModule` runs the universal pipeline automatically when `metadata.json` sets `"interface": "universal"`. It derives a `.lidl` from your impl header, then emits the uniform Qt-plugin glue and a Qt-free C-ABI export wrapper around your class (run for you, you don't invoke these):
 
 ```bash
-logos-cpp-generator --from-header src/<name>_impl.h \
-  --backend qt \
-  --impl-class <ImplClassName> \
-  --impl-header <name>_impl.h \
-  --metadata metadata.json \
+logos-cpp-generator --header-to-lidl src/<name>_impl.h \
+  --impl-class <ImplClassName> --metadata metadata.json \
+  -o ./generated_code/<name>.lidl
+logos-qt-generator  --lidl ./generated_code/<name>.lidl --backend cdylib \
+  --output-dir ./generated_code
+logos-cpp-generator --lidl ./generated_code/<name>.lidl --backend cdylib \
+  --impl-class <ImplClassName> --impl-header <name>_impl.h \
   --output-dir ./generated_code
 ```
 
-This produces `generated_code/<name>_qt_glue.h` and `generated_code/<name>_dispatch.cpp`. These files are listed in `CMakeLists.txt` under the `SOURCES` of `logos_module()`.
+This produces `generated_code/<name>.lidl`, `<name>_cdylib_glue.{h,cpp}`, and `<name>_module_impl.cpp`. You do **not** list these in `CMakeLists.txt` — `LogosModule.cmake` globs `generated_code/` automatically. See [codegen.md](codegen.md) for details.
 
 ## Testing
 

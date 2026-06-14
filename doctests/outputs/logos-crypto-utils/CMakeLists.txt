@@ -14,8 +14,6 @@ logos_module(
     SOURCES
         src/crypto_utils_impl.h
         src/crypto_utils_impl.cpp
-        generated_code/crypto_utils_qt_glue.h
-        generated_code/crypto_utils_dispatch.cpp
     INCLUDE_DIRS
         ${CMAKE_CURRENT_SOURCE_DIR}/generated_code
 )

@@ -11,13 +11,5 @@
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
-      preConfigure = ''
-        logos-cpp-generator --from-header src/crypto_utils_impl.h \
-          --backend qt \
-          --impl-class CryptoUtilsImpl \
-          --impl-header crypto_utils_impl.h \
-          --metadata metadata.json \
-          --output-dir ./generated_code
-      '';
     };
 }

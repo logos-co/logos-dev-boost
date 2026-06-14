@@ -54,7 +54,7 @@ logos-dev-boost init <name> --type <module|ui-qml|ui-qml-backend|full-app> [--ex
 
 | Option | Description |
 |--------|-------------|
-| `--type module` | **Universal C++ module** (default). Pure C++ with `std::string`, `int64_t`, `std::vector<T>`. The build system generates all Qt glue via `logos-cpp-generator --from-header`. No Qt in your code. |
+| `--type module` | **Universal C++ module** (default). Pure C++ with `std::string`, `int64_t`, `std::vector<T>`. The build system generates all Qt glue automatically (header-first cdylib pipeline). No Qt in your code. |
 | `--type ui-qml` | **Pure QML UI app**. QML-only Basecamp UI app with no C++ compilation. Calls backend modules via `logos.callModule()` bridge. |
 | `--type ui-qml-backend` | **QML + C++ backend UI app**. Process-isolated C++ backend (Qt Remote Objects) with QML frontend. Backend runs in `logos_host`, QML gets a typed replica via `logos.module()`. |
 | `--type full-app` | **Module + UI app together**. Creates a single root project with a `<name>-module/` subdirectory (universal C++ module) and a `<name>-ui/` subdirectory (Basecamp UI app). Each is a standalone flake. The UI flake includes the module as a Nix input and declares it as a runtime dependency. Ideal when you need both a backend and a frontend. |
@@ -161,7 +161,7 @@ Skills are task-specific knowledge modules that activate when the AI works on a 
 
 ## Two Component Types
 
-**Logos Modules** — Pure C++ "universal interface" modules. You write a plain C++ class with `std::string`, `int64_t`, `std::vector<T>`. The build system generates all Qt glue automatically via `logos-cpp-generator --from-header`. No Qt types in your code. This is the recommended approach for most functionality.
+**Logos Modules** — Pure C++ "universal interface" modules. You write a plain C++ class with `std::string`, `int64_t`, `std::vector<T>`. The build system generates all Qt glue automatically (header-first cdylib pipeline). No Qt types in your code. This is the recommended approach for most functionality.
 
 **UI Apps** — QML-based UI apps displayed in the Basecamp workspace. Two subtypes: pure QML (no C++, calls modules via `logos.callModule()`) or QML + C++ backend (process-isolated via Qt Remote Objects, QML gets a typed replica via `logos.module()`).
 

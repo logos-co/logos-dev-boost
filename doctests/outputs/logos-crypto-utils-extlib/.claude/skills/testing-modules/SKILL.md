@@ -202,23 +202,28 @@ LOGOS_TEST(method_emits_event) {
 
 ## Integration Tests with logoscore
 
-Test the module as a loaded plugin via the headless runtime:
+Test the module as a loaded plugin via the headless runtime. Start a clean daemon,
+load the module(s), then call methods with the `call` client command:
 
 ```bash
-logoscore -m ./result/lib -l my_module \
-  -c "my_module.doSomething(test_input)"
+# Start a clean daemon, then load the module(s) (deps resolved automatically)
+logoscore -D -m ./result/lib &
+logoscore load-module my_module
+logoscore load-module other_module
 
-logoscore -m ./result/lib -l my_module \
-  -c "my_module.init(config)" \
-  -c "my_module.process(data)"
+# Call methods (positional args; @file reads a parameter from a file)
+logoscore call my_module doSomething test_input
+logoscore call my_module init config
+logoscore call my_module process data
+logoscore call my_module callOther hello
 
-logoscore -m ./result/lib -l my_module,other_module \
-  -c "my_module.callOther(hello)"
+# Stop the daemon when done
+logoscore stop
 ```
 
 ### logoscore Argument Types
 
-Arguments in `-c` calls are auto-detected:
+Arguments in `call` are auto-detected:
 - `true` / `false` -> bool
 - `42` -> int
 - `3.14` -> double
@@ -254,5 +259,5 @@ After adding `checks` outputs to a repo's `flake.nix`, run `ws sync-graph` so th
 - Use `LogosTestContext` for mocking module calls and C library functions
 - `tests/CMakeLists.txt` must use `include(LogosTest)` + `logos_test()`
 - Integration tests verify the full plugin lifecycle (load, call, response)
-- Always use `--quit-on-finish` in CI for logoscore integration tests
+- In CI, start the logoscore daemon in the background, run your `call`s, then `logoscore stop` so the job exits
 - 30-second timeout per `-c` call; exit code 1 on failure

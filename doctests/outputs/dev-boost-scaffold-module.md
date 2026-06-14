@@ -108,10 +108,12 @@ method once the build generates the Qt glue around it.
 
 ## Step 2: Build the module
 
-`nix build` compiles the scaffolded module. Under the hood the flake runs
-`logos-cpp-generator --from-header` over `crypto_utils_impl.h` to synthesise
-the Qt plugin wrapper and dispatch code, then builds the plugin. Nix only
-sees git-tracked files, so we `git init` and stage everything first.
+`nix build` compiles the scaffolded module. The flake delegates to
+`logos-module-builder`, which runs the code generator over
+`crypto_utils_impl.h` to synthesise the Qt plugin wrapper and dispatch
+code, then builds the plugin — no hand-written codegen step in your
+flake. Nix only sees git-tracked files, so we `git init` and stage
+everything first.
 
 ### 2.1 Init git, stage, and build
 

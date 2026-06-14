@@ -2,10 +2,10 @@
 
 ## The Universal Interface Pattern
 
-Universal modules use **pure C++** for their implementation. You write a single implementation class using standard C++ types. The build system generates all Qt/plugin infrastructure automatically via `logos-cpp-generator --from-header`.
+Universal modules use **pure C++** for their implementation. You write a single implementation class using standard C++ types. The build system generates all Qt/plugin infrastructure automatically — universal modules are **header-first cdylibs** (see [codegen.md](codegen.md)).
 
 **You write:** A C++ class with `std::string`, `int64_t`, `bool`, `std::vector<T>`.
-**The generator produces:** Qt plugin class, method dispatch, introspection metadata.
+**The generator produces:** a derived `.lidl` contract, the uniform Qt-plugin glue, and a Qt-free C-ABI export wrapper around your class — so your code never touches Qt.
 
 ## Rules
 
@@ -83,18 +83,20 @@ private:
 
 ## Build Pipeline
 
-The `flake.nix` `preConfigure` hook runs the generator before CMake:
+You don't write a `preConfigure` or run the generator — `mkLogosModule` runs the universal pipeline automatically when `metadata.json` sets `"interface": "universal"`. It derives a `.lidl` from your impl header, then emits the uniform Qt-plugin glue and a Qt-free C-ABI export wrapper around your class (run for you, you don't invoke these):
 
 ```bash
-logos-cpp-generator --from-header src/<name>_impl.h \
-  --backend qt \
-  --impl-class <ImplClassName> \
-  --impl-header <name>_impl.h \
-  --metadata metadata.json \
+logos-cpp-generator --header-to-lidl src/<name>_impl.h \
+  --impl-class <ImplClassName> --metadata metadata.json \
+  -o ./generated_code/<name>.lidl
+logos-qt-generator  --lidl ./generated_code/<name>.lidl --backend cdylib \
+  --output-dir ./generated_code
+logos-cpp-generator --lidl ./generated_code/<name>.lidl --backend cdylib \
+  --impl-class <ImplClassName> --impl-header <name>_impl.h \
   --output-dir ./generated_code
 ```
 
-This produces `generated_code/<name>_qt_glue.h` and `generated_code/<name>_dispatch.cpp`. These files are listed in `CMakeLists.txt` under the `SOURCES` of `logos_module()`.
+This produces `generated_code/<name>.lidl`, `<name>_cdylib_glue.{h,cpp}`, and `<name>_module_impl.cpp`. You do **not** list these in `CMakeLists.txt` — `LogosModule.cmake` globs `generated_code/` automatically. See [codegen.md](codegen.md) for details.
 
 ## Testing
 
