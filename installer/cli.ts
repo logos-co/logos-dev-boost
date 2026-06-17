@@ -109,7 +109,15 @@ async function main() {
         path.join(projectDir, ".mcp.json"),
         JSON.stringify(mcpConfig, null, 2) + "\n"
       );
-      console.log("  .mcp.json (MCP server — auto-detected by Claude Code & Cursor)");
+      console.log("  .mcp.json (MCP server — auto-detected by Claude Code, Codex, Gemini)");
+
+      // Cursor reads its project MCP config from .cursor/mcp.json
+      fs.mkdirSync(path.join(projectDir, ".cursor"), { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, ".cursor", "mcp.json"),
+        JSON.stringify(mcpConfig, null, 2) + "\n"
+      );
+      console.log("  .cursor/mcp.json (MCP server — for Cursor)");
 
       // Copy skills for Claude Code
       const srcSkills = path.join(boostDir, "skills");

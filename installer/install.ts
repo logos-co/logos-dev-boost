@@ -104,7 +104,7 @@ function copySkills(boostDir: string, projectDir: string, targetDir: string) {
   }
 }
 
-function generateMcpJson(projectDir: string, boostDir: string) {
+function writeMcpConfig(mcpPath: string, boostDir: string) {
   const mcpConfig: Record<string, unknown> = {
     mcpServers: {
       "logos-dev-boost": {
@@ -114,8 +114,7 @@ function generateMcpJson(projectDir: string, boostDir: string) {
     },
   };
 
-  // Merge with existing .mcp.json if present
-  const mcpPath = path.join(projectDir, ".mcp.json");
+  // Merge with existing config if present
   if (fs.existsSync(mcpPath)) {
     const existing = JSON.parse(fs.readFileSync(mcpPath, "utf-8"));
     if (existing.mcpServers) {
@@ -126,7 +125,18 @@ function generateMcpJson(projectDir: string, boostDir: string) {
     }
   }
 
+  fs.mkdirSync(path.dirname(mcpPath), { recursive: true });
   fs.writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+}
+
+// Claude Code, Codex and Gemini read the project-root .mcp.json; Cursor reads
+// its project MCP config from .cursor/mcp.json.
+function generateMcpJson(projectDir: string, boostDir: string) {
+  writeMcpConfig(path.join(projectDir, ".mcp.json"), boostDir);
+}
+
+function generateCursorMcpJson(projectDir: string, boostDir: string) {
+  writeMcpConfig(path.join(projectDir, ".cursor", "mcp.json"), boostDir);
 }
 
 export async function runInstall(projectDir: string, boostDir: string) {
@@ -170,6 +180,9 @@ export async function runInstall(projectDir: string, boostDir: string) {
     if (tools.cursor) {
       execSync(`node "${path.join(genDir, "generate-cursor-rules.js")}" "${projectDir}" "${boostDir}"`, { stdio: "pipe" });
       generated.push(".cursor/rules/logos.mdc");
+
+      generateCursorMcpJson(projectDir, boostDir);
+      generated.push(".cursor/mcp.json");
     }
 
     // Install skills for non-Claude tools (use .agents/skills/)
@@ -202,7 +215,8 @@ export async function runInstall(projectDir: string, boostDir: string) {
 
   if (tools.cursor) {
     console.log("\nCursor: AGENTS.md + .cursor/rules loaded automatically.");
-    console.log("  MCP: Open Command Palette -> '/open MCP Settings' -> toggle on logos-dev-boost");
+    console.log("  MCP: configured in .cursor/mcp.json. Enable it via");
+    console.log("  Command Palette -> 'Open MCP Settings' -> toggle on logos-dev-boost");
   }
 
   if (tools.codex) {
