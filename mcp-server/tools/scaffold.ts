@@ -313,8 +313,8 @@ export function handleScaffold(args: Record<string, unknown>) {
               ? [
                   `cd ${path.basename(projectDir)}`,
                   "git init && git add -A",
-                  `cd ${name}-module && git init && git add -A && nix build`,
-                  `cd ../${name}-ui && git init && git add -A && nix build`,
+                  `cd ${name}-module && nix build`,
+                  `cd ../${name}-ui && nix build`,
                   `logoscore -D -m ./${name}-module/result/lib &`,
                   `logoscore load-module ${name}`,
                   `logoscore call ${name} ${sampleCall}`,

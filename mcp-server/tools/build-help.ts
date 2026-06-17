@@ -125,8 +125,9 @@ function buildHelp(project: { isUniversal: boolean; isFullApp: boolean; name: st
   if (project.isFullApp) {
     lines.push("Each sub-project is a standalone flake. Build them independently:");
     lines.push("```bash");
-    lines.push(`cd ${project.moduleDir} && git init && git add -A && nix build   # build the module`);
-    lines.push(`cd ${project.uiDir} && git init && git add -A && nix build       # build the UI app`);
+    lines.push("git init && git add -A   # one repo at the full-app root, tracks both sub-dirs");
+    lines.push(`cd ${project.moduleDir} && nix build   # build the module`);
+    lines.push(`cd ../${project.uiDir} && nix build     # build the UI app`);
     lines.push("nix build -L   # (run inside sub-project dir) Build with streaming logs");
     lines.push("```");
     lines.push("\n### In the workspace\n");
@@ -377,8 +378,8 @@ function commonIssues(project: { isUniversal: boolean; isFullApp?: boolean }): s
   lines.push("5. **Binary name mismatch** — `name` in metadata.json must match the binary prefix");
 
   if (project.isFullApp) {
-    lines.push("6. **Each sub-project needs its own git init** — Run `git init && git add -A` inside each sub-directory before `nix build`");
-    lines.push("7. **Module input not found** — The ui flake.nix includes the module as an input via `path:../<name>-module`. Ensure the module dir exists at that relative path and is git-tracked.");
+    lines.push("6. **Use ONE git repo at the root** — Run `git init && git add -A` once at the full-app root that tracks BOTH sub-dirs. Do NOT `git init` each sub-directory separately.");
+    lines.push("7. **`path:../<name>-module` input forbidden / 'too short to be a valid store path'** — The ui flake.nix includes the module via `path:../<name>-module`. This relative `path:` input only resolves in pure eval when both flakes share the same git tree. If each sub-dir was `git init`'d separately, remove the nested `.git` dirs and init a single repo at the root, or build with `nix build --override-input <name> path:../<name>-module`.");
   }
 
   if (project.isUniversal) {

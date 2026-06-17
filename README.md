@@ -98,12 +98,11 @@ logos-notes/
 └── .mcp.json / .claude/skills/
 ```
 
-Build each sub-project independently (each has its own standalone flake):
-
 ```bash
 cd logos-notes
-cd notes-module && git init && git add -A && nix build && cd ..
-cd notes-ui && git init && git add -A && nix build && cd ..
+git init && git add -A
+cd notes-module && nix build && cd ..
+cd notes-ui && nix build && cd ..
 ```
 
 ### `install` — Configure AI tools for an existing project

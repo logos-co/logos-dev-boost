@@ -34,7 +34,7 @@ logos-<name>/
 
 ## Key design points
 
-**Each sub-project is a standalone flake.** `cd <name>-module && nix build` and `cd <name>-ui && nix build` both work independently. Each sub-directory has its own `git init`. This keeps them compatible with the `ws` workspace tooling when they are eventually split into separate repos.
+**Each sub-project is a standalone flake.** `cd <name>-module && nix build` and `cd <name>-ui && nix build` both work independently. Initialize **one** git repo at the root that tracks both sub-dirs — do **not** `git init` each sub-directory separately. The UI flake's `path:../<name>-module` input only resolves in pure evaluation when both flakes share the same git tree; nesting a separate git repo per sub-dir breaks the relative `path:` input (Nix resolves it against the store copy and fails). This is purely a local-dev convenience. When you later publish each sub-project as its own remote repository (e.g. to add them to the `logos-workspace` meta-repo as git submodules), the UI stops using `path:../<name>-module` and instead consumes the module via a remote URL (`github:logos-co/<name>-module`, wired up with `follows` in the workspace flake) — so the local single-vs-multi repo layout has no bearing on that workflow.
 
 **No root flake.nix.** The root directory holds only AI context files (`project.json`, `AGENTS.md`, `CLAUDE.md`, `.mcp.json`, skills, `.gitignore`). There is no compositor flake — each sub-project builds on its own.
 
@@ -50,8 +50,11 @@ logos-<name>/
 logos-dev-boost init myapp --type full-app
 cd logos-myapp
 
-# Init and build module
-cd myapp-module && git init && git add -A && nix build
+# One git repo at the root tracks both sub-dirs (required for the UI's path: input)
+git init && git add -A
+
+# Build module
+cd myapp-module && nix build
 lm ./result/lib/myapp_plugin.so
 
 # Test module (start a daemon, call via the client, then stop)
@@ -63,11 +66,11 @@ logoscore stop
 cd ..
 
 # Build UI app (module must be git-tracked for the path: flake input)
-cd myapp-ui && git init && git add -A && nix build
+cd myapp-ui && nix build
 
 # Open root in IDE with full AI context
-cd ../..
-cursor logos-myapp
+cd ..
+cursor .
 ```
 
 ## Naming convention
