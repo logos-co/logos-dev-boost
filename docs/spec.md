@@ -165,7 +165,7 @@ The codegen runs automatically — `mkLogosModule` invokes the universal pipelin
 logos-cpp-generator --header-to-lidl src/crypto_utils_impl.h \
   --impl-class CryptoUtilsImpl --metadata metadata.json \
   -o ./generated_code/crypto_utils.lidl
-logos-qt-generator  --lidl ./generated_code/crypto_utils.lidl --backend cdylib \
+logos-qt-host-generator --lidl ./generated_code/crypto_utils.lidl --backend cdylib \
   --output-dir ./generated_code
 logos-cpp-generator --lidl ./generated_code/crypto_utils.lidl --backend cdylib \
   --impl-class CryptoUtilsImpl --impl-header crypto_utils_impl.h \

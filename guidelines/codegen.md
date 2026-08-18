@@ -19,7 +19,7 @@ parseImplHeader() — extracts public methods, maps C++ types to LIDL types
        ▼
 <name>.lidl (derived interface contract; also the events sidecar dependents consume)
        │
-       ├──► logos-qt-generator --lidl --backend cdylib
+       ├──► logos-qt-host-generator --lidl --backend cdylib
        │        └──► <name>_cdylib_glue.h / <name>_cdylib_glue.cpp
        │             — uniform Qt-plugin glue over the module-impl C ABI
        │
@@ -38,7 +38,7 @@ logos-cpp-generator --header-to-lidl src/<name>_impl.h \
   -o ./generated_code/<name>.lidl
 
 # 2. Generate the uniform Qt-plugin glue (logos_host loads it unchanged).
-logos-qt-generator --lidl ./generated_code/<name>.lidl \
+logos-qt-host-generator --lidl ./generated_code/<name>.lidl \
   --backend cdylib \
   --output-dir ./generated_code
 
