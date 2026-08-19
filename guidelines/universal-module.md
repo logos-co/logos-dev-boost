@@ -89,7 +89,7 @@ You don't write a `preConfigure` or run the generator — `mkLogosModule` runs t
 logos-cpp-generator --header-to-lidl src/<name>_impl.h \
   --impl-class <ImplClassName> --metadata metadata.json \
   -o ./generated_code/<name>.lidl
-logos-qt-generator  --lidl ./generated_code/<name>.lidl --backend cdylib \
+logos-qt-host-generator --lidl ./generated_code/<name>.lidl --backend cdylib \
   --output-dir ./generated_code
 logos-cpp-generator --lidl ./generated_code/<name>.lidl --backend cdylib \
   --impl-class <ImplClassName> --impl-header <name>_impl.h \
