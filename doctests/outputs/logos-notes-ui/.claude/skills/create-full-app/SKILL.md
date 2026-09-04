@@ -27,14 +27,14 @@ This creates `logos-<name>/` containing:
 
 ## After scaffolding
 
-Each sub-project is a **standalone flake** that builds independently. Build them one at a time:
+Each sub-project is a **standalone flake** that builds independently. Initialize **one** git repo at the root first — the UI flake's `path:../<name>-module` input only resolves when both flakes live in the same git tree, so do **not** `git init` the sub-dirs individually. Then build them one at a time:
 
 ```bash
 cd logos-<name>
-
-# 1. Init and build the module
-cd <name>-module
 git init && git add -A
+
+# 1. Build and exercise the module
+cd <name>-module
 nix build
 lm ./result/lib/<name>_plugin.so
 logoscore -D -m ./result/lib &
@@ -45,7 +45,6 @@ cd ..
 
 # 2. Build the UI app (module must be git-tracked for the path: flake input)
 cd <name>-ui
-git init && git add -A
 nix build
 cd ..
 ```

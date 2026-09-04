@@ -205,10 +205,12 @@ logos-<name>/                      # Open this in your IDE
 
 Scaffold with: `logos-dev-boost init <name> --type full-app`
 
-Each sub-project is a standalone flake — build inside the sub-directory:
+Each sub-project is a standalone flake. Initialize **one** git repo at the root (covering both sub-dirs), then build inside each sub-directory.
 ```bash
-cd <name>-module && git init && git add -A && nix build
-cd ../<name>-ui && git init && git add -A && nix build
+cd logos-<name>
+git init && git add -A
+cd <name>-module && nix build
+cd ../<name>-ui && nix build
 ```
 
 ## Module Naming
