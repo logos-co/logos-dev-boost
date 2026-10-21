@@ -17,14 +17,14 @@ Starting from nothing, it:
 3. Introspects the compiled plugin with `lm`, confirming the `echo` method the
    scaffold exposes is a discoverable `Q_INVOKABLE`.
 4. Builds and runs the scaffold's generated unit tests (`nix build .#unit-tests`).
-5. Loads the module into the headless `logoscore` runtime and calls `echo` —
+5. Loads the module into the headless `logosctl` runtime and calls `echo` —
    a real IPC round-trip into the freshly-scaffolded module.
 
 Because every step runs against the scaffold this dev-boost commit emits, a
 green run is real evidence that `init --type module` still produces a module
 that builds, introspects, tests, and runs.
 
-**What you'll build:** A `crypto_utils` universal C++ module, scaffolded by this dev-boost commit, then built, introspected, unit-tested, and called through `logoscore`.
+**What you'll build:** A `crypto_utils` universal C++ module, scaffolded by this dev-boost commit, then built, introspected, unit-tested, and called through `logosctl`.
 
 **What you'll learn:**
 
@@ -32,7 +32,7 @@ that builds, introspects, tests, and runs.
 - How the Nix build generates Qt plugin glue from a plain C++ interface
 - How to introspect a compiled module's `Q_INVOKABLE` methods with `lm`
 - How to run a scaffolded module's generated unit tests
-- How to call a module method through the headless `logoscore` runtime
+- How to call a module method through the headless `logosctl` runtime
 
 ## Prerequisites
 
@@ -174,70 +174,67 @@ fails the build; a green build means every generated test passed.
 
 ---
 
-## Step 5: Run the module in `logoscore`
+## Step 5: Run the module in `logosctl`
 
 Finally, run the scaffolded module in the real headless runtime. Build the
-[`logoscore`](https://github.com/logos-co/logos-logoscore-cli) CLI, install
-the module into a runtime `modules/` directory, then start the daemon, load
-`crypto_utils`, and call `echo` — a real IPC round-trip into the module.
+[`logosctl`](https://github.com/logos-co/logos-logoscore-cli) CLI, package
+the module, start the daemon, install the package into it, then load
+`crypto_utils` and call `echo` — a real IPC round-trip into the module.
 
-### 5.1 Build logoscore
+### 5.1 Build logosctl
 
 ```bash
-nix build 'github:logos-co/logos-logoscore-cli' -o logos
+nix build 'github:logos-co/logos-logoscore-cli#ctl' -o logos
 ```
 
-The runtime is at `./logos/bin/logoscore`.
+The runtime is at `./logos/bin/logosctl`.
 
-### 5.2 Install the module into a runtime directory
+### 5.2 Package the module
 
-`logoscore` discovers modules from `modules/<name>/` directories, each
-with a `manifest.json` beside the plugin. The scaffold's flake exposes a
-ready-to-use `#install` output that produces exactly that layout — build
-it and link it as `./modules-install`.
+The scaffold's flake exposes an `#lgx` output: the module packaged as
+an `.lgx`, the format `logosctl install` takes. Build it and link it as
+`./crypto-utils-lgx`.
 
 ```bash
 cd logos-crypto-utils
-nix build '.#install' -o ../modules-install
+nix build '.#lgx' -o ../crypto-utils-lgx
 ```
-
-`modules-install/modules/crypto_utils/` now holds the plugin, its
-`manifest.json`, and a platform `variant` marker — the layout the host
-scans at startup.
 
 ### 5.3 Start the daemon
 
-Start logoscore in daemon mode pointed at the installed modules
-directory, capturing output to `logs.txt`:
+The session directory, `./session`, holds the daemon's config, its
+installed modules and their data. `--detach` returns once the daemon
+accepts commands.
 
 ```bash
-logoscore -D -m modules-install/modules > logs.txt &
+logosctl daemon start --detach
 ```
 
-The `-D` flag starts the background daemon; the client subcommands below
-connect to it via the config under `~/.logoscore/`.
+### 5.4 Install the module
+
+Install the package into the daemon's session:
 
 ```bash
-sleep 3
+logosctl install crypto-utils-lgx/*.lgx -y
 ```
 
-### 5.4 List discovered modules
+### 5.5 List discovered modules
 
-`crypto_utils` should appear in the scan directory:
+`crypto_utils` should now be listed:
 
 ```bash
-logoscore list-modules
+logosctl module ls
 ```
 
-### 5.5 Load the module
+### 5.6 Load the module
 
 Load `crypto_utils` into the running daemon:
 
 ```bash
-logoscore load-module crypto_utils
+logosctl module load crypto_utils
 ```
 
-### 5.6 Call echo
+### 5.7 Call echo
 
 Call `echo` with a string argument. This is a real round-trip: the
 client sends the call to the daemon, the host dispatches it to the
@@ -245,19 +242,19 @@ plugin's generated glue, which invokes `CryptoUtilsImpl::echo`, and the
 result travels back over IPC.
 
 ```bash
-logoscore call crypto_utils echo hello
+logosctl call crypto_utils echo hello
 ```
 
 `echo: hello` comes straight from `CryptoUtilsImpl::echo` — the plain
 C++ method you saw in Step 1, now compiled into a Qt plugin, loaded by
 the host, and invoked over IPC.
 
-### 5.7 Stop the daemon
+### 5.8 Stop the daemon
 
 Shut the daemon down cleanly:
 
 ```bash
-logoscore stop
+logosctl daemon stop
 ```
 
 The scaffold this dev-boost commit produced builds, introspects, tests,

@@ -21,19 +21,19 @@ intro: |
   3. Build the module. The C source is compiled straight into the plugin and the
      Qt glue is generated from the wrapper header — no Qt in your code.
   4. Introspect the compiled plugin with `lm` and run the generated unit tests.
-  5. Install the module and call its methods through the `logoscore` daemon —
+  5. Install the module and call its methods through the `logosctl` daemon —
      each call a real round-trip into the wrapped C library.
 
   A green run is real evidence that `init --lib-dir` still produces a module that
   correctly wraps a C library and runs end-to-end.
 
-what_you_build: "A `crypto_utils` module wrapping a small C library (`libcipher`), scaffolded by this dev-boost commit, then built, introspected, unit-tested, and called through `logoscore`."
+what_you_build: "A `crypto_utils` module wrapping a small C library (`libcipher`), scaffolded by this dev-boost commit, then built, introspected, unit-tested, and called through `logosctl`."
 
 what_you_learn:
   - How `init --lib-dir` parses a C header and generates a C++ wrapper class
   - How C types map to the Logos type system (`int` → `int64_t`, `const char*` → `std::string`)
   - How a source-only C library is compiled straight into the plugin
-  - How to introspect, unit-test, and call the wrapped module through `logoscore`
+  - How to introspect, unit-test, and call the wrapped module through `logosctl`
 
 prerequisites:
   - |
@@ -228,43 +228,53 @@ sections:
           A green build means every generated test compiled, linked against the C
           library, and passed.
 
-  - title: "Run the module in `logoscore`"
+  - title: "Run the module in `logosctl`"
     step: true
     text: |
       Finally, run the module in the real headless runtime. Build
-      [`logoscore`](https://github.com/logos-co/logos-logoscore-cli), install the
-      module into a runtime `modules/` directory, then start the daemon and call
-      the wrapped functions — each call a real round-trip through the C library.
+      [`logosctl`](https://github.com/logos-co/logos-logoscore-cli), package the
+      module, start the daemon, install the package into it, then call the
+      wrapped functions — each call a real round-trip through the C library.
     steps:
-      - title: "Build logoscore"
-        run: "nix build 'github:logos-co/logos-logoscore-cli' -o logos"
-        check_file: "logos/bin/logoscore"
-        post_text: "The runtime is at `./logos/bin/logoscore`."
+      - title: "Build logosctl"
+        run: "nix build 'github:logos-co/logos-logoscore-cli#ctl' -o logos"
+        check_file: "logos/bin/logosctl"
+        post_text: "The runtime is at `./logos/bin/logosctl`."
 
-      - title: "Install the module into a runtime directory"
+      - title: "Package the module"
         text: |
-          `logoscore` discovers modules from `modules/<name>/` directories, each
-          with a `manifest.json`. The scaffold's flake exposes a ready-to-use
-          `#install` output that produces exactly that layout.
-        run: "sh -c 'cd logos-crypto-utils && nix build .#install -o ../modules-install'"
+          The scaffold's flake exposes an `#lgx` output: the module packaged as
+          an `.lgx`, the format `logosctl install` takes. Build it and link it as
+          `./crypto-utils-lgx`.
+        run: "sh -c 'cd logos-crypto-utils && nix build .#lgx -o ../crypto-utils-lgx'"
         code_block: |
           cd logos-crypto-utils
-          nix build '.#install' -o ../modules-install
-        check_file: "modules-install/modules/crypto_utils/manifest.json"
+          nix build '.#lgx' -o ../crypto-utils-lgx
 
       - title: "Start the daemon"
         text: |
-          Start logoscore in daemon mode pointed at the installed modules
-          directory, capturing output to `logs.txt`:
-        run: "sh -c './logos/bin/logoscore -D -m modules-install/modules > logs.txt 2>&1 &'"
-        code_block: "logoscore -D -m modules-install/modules > logs.txt &"
+          The session directory, `./session`, holds the daemon's config, its
+          installed modules and their data. `--detach` returns once the daemon
+          accepts commands.
+        # The bundled package downloader starts a storage node in $HOME; keep it
+        # out of the real one.
+        run: "mkdir -p home && HOME=\"$PWD/home\" ./logos/bin/logosctl --config-dir ./session daemon start --detach"
+        code_block: "logosctl daemon start --detach"
+        expect_contains:
+          - "Daemon started"
 
-      - run: "sleep 3"
+      - title: "Install the module"
+        text: "Install the package into the daemon's session:"
+        run: "./logos/bin/logosctl --config-dir ./session install crypto-utils-lgx/*.lgx -y"
+        code_block: "logosctl install crypto-utils-lgx/*.lgx -y"
+        expect_contains:
+          - '"installed":["crypto_utils"]'
+          - '"status":"ok"'
 
       - title: "Load the module"
         text: "Load `crypto_utils` into the running daemon:"
-        run: "./logos/bin/logoscore load-module crypto_utils"
-        code_block: "logoscore load-module crypto_utils"
+        run: "./logos/bin/logosctl --config-dir ./session module load crypto_utils"
+        code_block: "logosctl module load crypto_utils"
         expect_contains:
           - "crypto_utils"
           - '"status":"ok"'
@@ -274,8 +284,8 @@ sections:
           `cipher_checksum` sums the byte values of its argument. For `hello` that
           is `104 + 101 + 108 + 108 + 111 = 532` — a deterministic round-trip
           through the wrapped C function:
-        run: "./logos/bin/logoscore call crypto_utils checksum hello"
-        code_block: "logoscore call crypto_utils checksum hello"
+        run: "./logos/bin/logosctl --config-dir ./session call crypto_utils checksum hello"
+        code_block: "logosctl call crypto_utils checksum hello"
         expect_contains:
           - '"result":532'
 
@@ -283,8 +293,8 @@ sections:
         text: |
           `cipher_caesar_shift` adds `shift` to a character code. `5 + 3` is `8`,
           exercising an `int → int64_t` round-trip in both directions:
-        run: "./logos/bin/logoscore call crypto_utils caesar_shift 5 3"
-        code_block: "logoscore call crypto_utils caesar_shift 5 3"
+        run: "./logos/bin/logosctl --config-dir ./session call crypto_utils caesar_shift 5 3"
+        code_block: "logosctl call crypto_utils caesar_shift 5 3"
         expect_contains:
           - '"result":8'
 
@@ -292,8 +302,8 @@ sections:
         text: |
           `cipher_version` returns a C string; the wrapper converts it to a
           `std::string`, which comes back as `"1.0.0"`:
-        run: "./logos/bin/logoscore call crypto_utils version"
-        code_block: "logoscore call crypto_utils version"
+        run: "./logos/bin/logosctl --config-dir ./session call crypto_utils version"
+        code_block: "logosctl call crypto_utils version"
         expect_contains:
           - '"result":"1.0.0"'
         post_text: |
@@ -303,8 +313,8 @@ sections:
 
       - title: "Stop the daemon"
         text: "Shut the daemon down cleanly:"
-        run: "./logos/bin/logoscore stop"
-        code_block: "logoscore stop"
+        run: "./logos/bin/logosctl --config-dir ./session daemon stop"
+        code_block: "logosctl daemon stop"
         post_text: |
           The module this dev-boost commit scaffolded from a raw C library builds,
           introspects, tests, and runs end-to-end.

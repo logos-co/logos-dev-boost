@@ -78,7 +78,7 @@ jobs:
   # (doctests/dev-boost-scaffold-module.test.yaml) end-to-end via the shared
   # doctest CLI: scaffolds a crypto_utils module with THIS commit of dev-boost,
   # builds it, introspects it with lm, runs its unit tests, calls it through
-  # logoscore, and asserts on the output.
+  # logosctl, and asserts on the output.
   doctests:
     # ATTIC_TOKEN_PUBLIC only exists in the public-cache environment; master
     # jobs must opt into it to publish to the public cache.
