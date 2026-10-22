@@ -7,7 +7,8 @@ This documents what `logos-dev-boost init <name>` scaffolds for UI apps (impleme
 ### Generated files
 
 - `Main.qml` — QML entry point, uses `logos.callModule()` to call backend modules
-- `metadata.json` — `"type": "ui_qml"`, `"view": "Main.qml"`, no `"main"` field
+- `icons/icon.png` — placeholder package icon (PNG, exactly 256x256)
+- `metadata.json` — `"type": "ui_qml"`, `"view": "Main.qml"`, `"icon": "icons/icon.png"`, no `"main"` field
 - `flake.nix` — `mkLogosQmlModule` (no preConfigure, no compilation)
 - `.gitignore` — `result`, `build/`, `.DS_Store`
 
@@ -33,7 +34,8 @@ The `logos` bridge is injected by the host (Basecamp or standalone runner).
 - `src/<name>_interface.h` — extends `PluginInterface`, declares Qt plugin interface IID
 - `src/<name>_plugin.h` / `src/<name>_plugin.cpp` — plugin class inheriting `<Pascal>SimpleSource` + `<Pascal>Interface` + `<Pascal>ViewPluginBase`; uses `initLogos()` + `setBackend(this)`
 - `src/qml/Main.qml` — QML frontend using `logos.module("name")` for typed replica, `logos.watch()` for async calls
-- `metadata.json` — `"type": "ui_qml"`, `"main": "<name>_plugin"`, `"view": "qml/Main.qml"`
+- `src/icons/icon.png` — placeholder package icon (PNG, exactly 256x256)
+- `metadata.json` — `"type": "ui_qml"`, `"main": "<name>_plugin"`, `"view": "qml/Main.qml"`, `"icon": "src/icons/icon.png"`
 - `CMakeLists.txt` — `logos_module()` with `REP_FILE` for Qt Remote Objects code generation
 - `flake.nix` — `mkLogosQmlModule`
 - `.gitignore` — `result`, `build/`, `.DS_Store`

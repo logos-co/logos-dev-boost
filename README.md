@@ -91,6 +91,7 @@ logos-notes/
 │   ├── src/notes_ui_plugin.h/cpp
 │   ├── src/NotesUiBackend.h/cpp
 │   ├── src/qml/Main.qml
+│   ├── src/icons/icon.png         # package icon (256x256 PNG)
 │   ├── metadata.json              # dependencies: ["notes"]
 │   └── flake.nix                  # includes notes.url = "path:../notes-module"
 ├── project.json                   # { "type": "full-app", "name": "notes", ... }

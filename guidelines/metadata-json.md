@@ -109,7 +109,7 @@ These values are passed to CMake by the `logos_module()` macro. They supplement,
 {
   "type": "ui_qml",
   "view": "Main.qml",
-  "icon": "icon.png",
+  "icon": "icons/icon.png",
   "category": "tools"
 }
 ```
@@ -118,6 +118,7 @@ These values are passed to CMake by the `logos_module()` macro. They supplement,
 |-------|------|-------------|
 | `view` | string | **Required** for `ui_qml`. Path to QML entry point (e.g., `"Main.qml"` or `"qml/Main.qml"`) |
 | `main` | string | **Optional**. If present, indicates a C++ backend plugin (e.g., `"my_app_plugin"`). If absent, the app is pure QML |
+| `icon` | string | **Required** to package a `ui_qml` app. Path to a PNG of exactly 256x256, relative to the project root (e.g., `"icons/icon.png"` or `"src/icons/icon.png"`). Packaging (`nix build .#lgx`, `nix run .`) fails without it |
 
 Pure QML apps have no `"main"` field — no C++ compilation occurs. QML + backend apps have both `"main"` (C++ plugin) and `"view"` (QML entry point).
 

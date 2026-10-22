@@ -18,13 +18,13 @@ Simplest UI app type. No compilation, no C++ code. The host loads QML directly.
   "version": "1.0.0",
   "description": "My QML UI application",
   "view": "Main.qml",
-  "icon": null,
+  "icon": "icons/icon.png",
   "category": "tools",
   "dependencies": ["some_backend_module"]
 }
 ```
 
-Key fields: `"type": "ui_qml"` and `"view"` pointing to the QML entry point. No `"main"` field.
+Key fields: `"type": "ui_qml"` and `"view"` pointing to the QML entry point. No `"main"` field. `"icon"` (a 256x256 PNG) is required to package any `ui_qml` app — see [metadata-json.md](metadata-json.md).
 
 ### QML Pattern
 
@@ -107,7 +107,7 @@ For apps that need business logic, state management, or access to system APIs. T
   "description": "My UI app with C++ backend",
   "main": "my_app_plugin",
   "view": "qml/Main.qml",
-  "icon": null,
+  "icon": "src/icons/icon.png",
   "category": "tools",
   "dependencies": []
 }

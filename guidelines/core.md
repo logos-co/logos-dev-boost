@@ -27,6 +27,7 @@ logos-<name>/                      # Open this in your IDE
     src/<name>_ui_plugin.h/cpp
     src/<Pascal>UiBackend.h/cpp
     src/qml/Main.qml
+    src/icons/icon.png             # package icon (256x256 PNG)
   project.json                     # { "type": "full-app", "name": "<name>" }
   AGENTS.md / CLAUDE.md / .mcp.json
 ```
@@ -65,6 +66,7 @@ Pure QML app:
 ```
 my_app/
 ├── Main.qml                      # QML entry point
+├── icons/icon.png                # package icon (256x256 PNG)
 ├── metadata.json                 # "type": "ui_qml", "view": "Main.qml"
 └── flake.nix                     # mkLogosQmlModule
 ```
@@ -76,6 +78,7 @@ my_app/
 │   ├── my_app.rep                # Qt Remote Objects interface
 │   ├── my_app_interface.h        # extends PluginInterface
 │   ├── my_app_plugin.h/cpp       # SimpleSource + ViewPluginBase
+│   ├── icons/icon.png            # package icon (256x256 PNG)
 │   └── qml/Main.qml              # QML frontend (logos.module() replica)
 ├── metadata.json                 # "type": "ui_qml", "main": "my_app_plugin"
 ├── CMakeLists.txt                # logos_module() with REP_FILE
