@@ -39,6 +39,36 @@ export const scaffoldTool: Tool = {
   },
 };
 
+// Placeholder 256x256 PNG (logos-module-builder's UI template icon). Every ui_qml
+// package must ship one: logos-package docs/spec.md#icon-contract.
+const PLACEHOLDER_ICON_PNG = Buffer.from(
+  `
+iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAEt0lEQVR42u3ZPa7dRBiA4XNQloBg
+ESnSZRNINPRQQAMLoqJhAWkiZVGJsodQEfGTm9xzj+2Z8fs8nS3L+lz41Yzm+vzFyw8XIOmr0QMA
+4wgAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkA
+hAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkA
+hAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkA
+hAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhAkAhD0bPcBKfvrl
+t9Ej8Eh//vH76BGWYAUAYQIAYQIAYQIAYQIAYU4B2MGHWy6f7Hq9jv7Q5QnAjt68fnV5/+7t6DFO
+y7Hs/WwBdvTd9z9cvv7m29FjwIMEYGciwMwE4AAiwKwE4CAiwIwEYCNvXr/64jMiwGwEYCPv370V
+AZYjABsSAVYjABsTAVYiADsQAVYhADsRAVYgADsSAWYnADsTAWYmAAcQAWYlAAcRAWYkAAcSAWYj
+AAcTAWYiAAOIALMQgEFEgBkIwEAiwGgCMJgIMJIATEAEGEUAJiECjCAAExEBjiYAkxEBjiQAExIB
+jiIAkxIBjiAAExMB9iYAkxMB9iQACxAB9iIAixAB9iAACxEBtiYAixEBtiQACxIBtiIAixIBtiAA
+CxMB7iUAixMB7iEAJyACPJUAnIQI8BQCcCIiwK0E4GREgFsIwAmJAI8lACclAjyGAJyYCPAlAnBy
+IsDnCECACPAQAYgQAT5FAEJEgP8SgBgR4J8EIEgE+JsARIkAl4sApIkAAhAnAm0CgAiECQCXy0UE
+qgSAj0SgRwD4FxFoEQD+RwQ6BIBPEoEGAeBBInB+AsBnicC5CQBfJALnJQA8igickwDwaCJwPgLA
+TUTgXASAm4nAeQgATyIC5yAAPJkIrE8AuIsIrE0AuJsIrEsA2IQIrEkA2IwIrEcA2JQIrEUA2JwI
+rEMA2IUIrEEA2I0IzE8A2JUIzE0A2J0IzEsAOIQIzEkAOIwIzEcAOJQIzEUAOJwIzEMAGEIE5iAA
+DCMC4wkAQ4nAWALAcCIwjgAwBREYQwCYhggcTwCYyi0R4H4CwHQeGwHuJwBMSQSOIQBMSwT2JwBM
+TQT29Wz0AGfx48+/bvKe6+034MkEYCPXqx+T9dgCQJgAQJgAQJgAQJgAQNj1+YuXH0YPAYxhBQBh
+AgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBh
+AgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBh
+AgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBh
+AgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhAgBhfwF6Wx91LEYaDgAA
+AABJRU5ErkJggg==`,
+  "base64"
+);
+
 function toPascalCase(name: string): string {
   return name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
 }
@@ -343,7 +373,7 @@ export function handleScaffold(args: Record<string, unknown>) {
   };
 }
 
-function writeFile(filePath: string, content: string, filesCreated: string[]) {
+function writeFile(filePath: string, content: string | Uint8Array, filesCreated: string[]) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content);
   filesCreated.push(filePath);
@@ -687,7 +717,7 @@ function createQmlApp(
         type: "ui_qml",
         category: "ui",
         view: "Main.qml",
-        icon: null,
+        icon: "icons/icon.png",
         dependencies: [],
         nix: {
           packages: { build: [], runtime: [] },
@@ -709,6 +739,8 @@ build/
 `,
     filesCreated
   );
+
+  writeFile(path.join(dir, "icons/icon.png"), PLACEHOLDER_ICON_PNG, filesCreated);
 
   writeFile(
     path.join(dir, "Main.qml"),
@@ -798,7 +830,7 @@ function createQmlBackendApp(
         category: "ui",
         main: `${name}_plugin`,
         view: "qml/Main.qml",
-        icon: null,
+        icon: "src/icons/icon.png",
         dependencies: [],
         nix: {
           packages: { build: [], runtime: [] },
@@ -820,6 +852,8 @@ build/
 `,
     filesCreated
   );
+
+  writeFile(path.join(dir, "src/icons/icon.png"), PLACEHOLDER_ICON_PNG, filesCreated);
 
   writeFile(
     path.join(dir, `src/${name}_interface.h`),

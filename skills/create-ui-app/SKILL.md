@@ -40,6 +40,7 @@ nix run .
 ```
 logos-my-app/
 ├── Main.qml              ← QML entry point
+├── icons/icon.png         ← package icon (PNG, exactly 256x256)
 ├── metadata.json          ← "type": "ui_qml", "view": "Main.qml"
 ├── flake.nix              ← uses mkLogosQmlModule
 └── .gitignore
@@ -56,12 +57,15 @@ No C++ files, no CMakeLists.txt, no compilation.
   "description": "My QML UI application",
   "type": "ui_qml",
   "view": "Main.qml",
+  "icon": "icons/icon.png",
   "category": "tools",
   "dependencies": ["some_backend_module"]
 }
 ```
 
 Note: No `"main"` field — this signals a pure QML app.
+
+`"icon"` is required to package any `ui_qml` app: a PNG of exactly 256x256, path relative to the project root. The scaffold writes a placeholder; replace it with your own artwork.
 
 ### `Main.qml`
 
@@ -191,6 +195,7 @@ logos-my-app/
 │   ├── my_app.rep             ← Qt Remote Objects interface definition
 │   ├── my_app_plugin.h        ← inherits SimpleSource + Interface + ViewPluginBase
 │   ├── my_app_plugin.cpp      ← implementation
+│   ├── icons/icon.png         ← package icon (PNG, exactly 256x256)
 │   └── qml/
 │       └── Main.qml           ← QML frontend (uses logos.module() replica)
 ├── metadata.json              ← "type": "ui_qml", "main": "my_app_plugin"
@@ -209,12 +214,13 @@ logos-my-app/
   "type": "ui_qml",
   "main": "my_app_plugin",
   "view": "qml/Main.qml",
+  "icon": "src/icons/icon.png",
   "category": "tools",
   "dependencies": []
 }
 ```
 
-The `"main"` field signals a C++ backend is present.
+The `"main"` field signals a C++ backend is present. `"icon"` is required here too: every `ui_qml` package ships a 256x256 PNG.
 
 ### Step 2: `.rep` File (Qt Remote Objects Interface)
 

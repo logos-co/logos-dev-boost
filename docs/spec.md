@@ -284,6 +284,7 @@ Output:
 ```
 notes_ui/
 ├── Main.qml                      # QML entry point
+├── icons/icon.png                # package icon (256x256 PNG)
 ├── metadata.json                 # "type": "ui_qml", "view": "Main.qml"
 ├── flake.nix                     # mkLogosQmlModule
 ├── CLAUDE.md
@@ -335,6 +336,7 @@ notes_app/
 │   ├── notes_app_interface.h     # extends PluginInterface
 │   ├── notes_app_plugin.h        # SimpleSource + ViewPluginBase
 │   ├── notes_app_plugin.cpp      # implementation
+│   ├── icons/icon.png            # package icon (256x256 PNG)
 │   └── qml/
 │       └── Main.qml              # QML frontend (logos.module() replica)
 ├── metadata.json                 # "type": "ui_qml", "main": "notes_app_plugin"

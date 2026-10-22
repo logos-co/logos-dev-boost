@@ -5,7 +5,7 @@
   "type": "ui_qml",
   "category": "ui",
   "view": "Main.qml",
-  "icon": null,
+  "icon": "icons/icon.png",
   "dependencies": [],
   "nix": {
     "packages": {

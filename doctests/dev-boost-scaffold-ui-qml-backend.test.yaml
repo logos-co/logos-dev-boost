@@ -92,8 +92,9 @@ sections:
           │   ├── notes_app_interface.h    # Logos plugin interface (name/version)
           │   ├── notes_app_plugin.h       # Backend: inherits NotesAppSimpleSource
           │   ├── notes_app_plugin.cpp     # Backend implementation (runs in ui-host)
+          │   ├── icons/icon.png           # Package icon (256x256 PNG placeholder)
           │   └── qml/Main.qml             # The QML view — talks to the backend replica
-          ├── metadata.json                # type: ui_qml, main: notes_app_plugin
+          ├── metadata.json                # type: ui_qml, main: notes_app_plugin, icon
           ├── CMakeLists.txt               # logos_module(... REP_FILE src/notes_app.rep)
           ├── flake.nix                    # mkLogosQmlModule (standalone app)
           ├── AGENTS.md / CLAUDE.md         # AI context

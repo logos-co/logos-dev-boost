@@ -73,7 +73,8 @@ The scaffold lays out a complete, runnable QML app:
 ```
 logos-notes-ui/
 ├── Main.qml                    # The QML view — your UI
-├── metadata.json               # type: ui_qml, view: Main.qml
+├── icons/icon.png              # Package icon (256x256 PNG placeholder)
+├── metadata.json               # type: ui_qml, view: Main.qml, icon
 ├── flake.nix                   # mkLogosQmlModule (standalone app)
 ├── AGENTS.md / CLAUDE.md       # AI context
 └── .mcp.json / .claude/skills/ # MCP server + on-demand skills

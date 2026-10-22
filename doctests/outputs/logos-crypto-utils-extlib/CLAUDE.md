@@ -196,6 +196,7 @@ logos-<name>/                      # Open this in your IDE
     src/<name>_ui_plugin.h/cpp
     src/<Pascal>UiBackend.h/cpp
     src/qml/Main.qml
+    src/icons/icon.png             # package icon (256x256 PNG)
   project.json                     # { "type": "full-app", "name": "<name>" }
   AGENTS.md / CLAUDE.md / .mcp.json
 ```
@@ -234,6 +235,7 @@ Pure QML app:
 ```
 my_app/
 ├── Main.qml                      # QML entry point
+├── icons/icon.png                # package icon (256x256 PNG)
 ├── metadata.json                 # "type": "ui_qml", "view": "Main.qml"
 └── flake.nix                     # mkLogosQmlModule
 ```
@@ -245,6 +247,7 @@ my_app/
 │   ├── my_app.rep                # Qt Remote Objects interface
 │   ├── my_app_interface.h        # extends PluginInterface
 │   ├── my_app_plugin.h/cpp       # SimpleSource + ViewPluginBase
+│   ├── icons/icon.png            # package icon (256x256 PNG)
 │   └── qml/Main.qml              # QML frontend (logos.module() replica)
 ├── metadata.json                 # "type": "ui_qml", "main": "my_app_plugin"
 ├── CMakeLists.txt                # logos_module() with REP_FILE
@@ -380,7 +383,7 @@ These values are passed to CMake by the `logos_module()` macro. They supplement,
 {
   "type": "ui_qml",
   "view": "Main.qml",
-  "icon": "icon.png",
+  "icon": "icons/icon.png",
   "category": "tools"
 }
 ```
@@ -389,6 +392,7 @@ These values are passed to CMake by the `logos_module()` macro. They supplement,
 |-------|------|-------------|
 | `view` | string | **Required** for `ui_qml`. Path to QML entry point (e.g., `"Main.qml"` or `"qml/Main.qml"`) |
 | `main` | string | **Optional**. If present, indicates a C++ backend plugin (e.g., `"my_app_plugin"`). If absent, the app is pure QML |
+| `icon` | string | **Required** to package a `ui_qml` app. Path to a PNG of exactly 256x256, relative to the project root (e.g., `"icons/icon.png"` or `"src/icons/icon.png"`). Packaging (`nix build .#lgx`, `nix run .`) fails without it |
 
 Pure QML apps have no `"main"` field — no C++ compilation occurs. QML + backend apps have both `"main"` (C++ plugin) and `"view"` (QML entry point).
 
@@ -778,13 +782,13 @@ Simplest UI app type. No compilation, no C++ code. The host loads QML directly.
   "version": "1.0.0",
   "description": "My QML UI application",
   "view": "Main.qml",
-  "icon": null,
+  "icon": "icons/icon.png",
   "category": "tools",
   "dependencies": ["some_backend_module"]
 }
 ```
 
-Key fields: `"type": "ui_qml"` and `"view"` pointing to the QML entry point. No `"main"` field.
+Key fields: `"type": "ui_qml"` and `"view"` pointing to the QML entry point. No `"main"` field. `"icon"` (a 256x256 PNG) is required to package any `ui_qml` app — see [metadata-json.md](metadata-json.md).
 
 ### QML Pattern
 
@@ -867,7 +871,7 @@ For apps that need business logic, state management, or access to system APIs. T
   "description": "My UI app with C++ backend",
   "main": "my_app_plugin",
   "view": "qml/Main.qml",
-  "icon": null,
+  "icon": "src/icons/icon.png",
   "category": "tools",
   "dependencies": []
 }

@@ -91,8 +91,9 @@ logos-myapp/
     src/myapp_impl.cpp
     tests/test_myapp.cpp
   myapp-ui/
-    metadata.json        "type": "ui", "dependencies": ["myapp"]
+    metadata.json        "type": "ui_qml", "dependencies": ["myapp"]
     flake.nix            includes myapp.url = "path:../myapp-module"
+    src/icons/icon.png   package icon (256x256 PNG, metadata.json "icon")
     src/myapp_ui_plugin.h/cpp
     src/MyappUiBackend.h/cpp
     src/qml/Main.qml
